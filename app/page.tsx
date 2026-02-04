@@ -20,11 +20,16 @@ import { PnlBadge } from "./components/PnlBadge";
 type Trade = {
   tradeId: string;
   commodity: string;
+  quantityMt: number;
+  arrivalDate: string;
   usdInvoice: number;
   inrSale: number;
   inrSaleDate: string;
   mtbFx: number;
   mtmFx?: number;
+  mtbInr: number;
+  mtmInr: number;
+  hedgeStrategy?: string;
 };
 
 type FxData = {
@@ -73,7 +78,6 @@ export default function DashboardPage() {
       setTrades(tradesData.trades || []);
       setFx(fxData.fx);
 
-      // Fetch suggestions
       if (tradesData.trades?.length && fxData.fx) {
         fetch("/api/suggestions", {
           method: "POST",
@@ -98,31 +102,32 @@ export default function DashboardPage() {
 
   const totalUsd = trades.reduce((s, t) => s + t.usdInvoice, 0);
   const totalInr = trades.reduce((s, t) => s + t.inrSale, 0);
+  const totalMtb = trades.reduce((s, t) => s + t.mtbInr, 0);
+  const totalMtm = trades.reduce((s, t) => s + t.mtmInr, 0);
+  const fxGainLoss = totalMtm - totalMtb;
+
+  // Blended book rate from INR amounts
   const blendedMtb =
     totalUsd > 0
       ? trades.reduce((s, t) => s + t.mtbFx * t.usdInvoice, 0) / totalUsd
       : 0;
-  const mtmPnlInr = trades.reduce(
-    (s, t) => s + (t.mtbFx - fx.spot) * t.usdInvoice,
-    0
-  );
+
+  // Chart data: FX P&L per trade
+  const barData = trades.map((t) => ({
+    name: t.commodity.length > 15 ? t.commodity.slice(0, 15) + "..." : t.commodity,
+    pnl: t.mtmInr - t.mtbInr,
+    exposure: t.usdInvoice,
+  }));
 
   // Chart data: exposure by commodity
   const commodityMap = new Map<string, number>();
   trades.forEach((t) => {
-    const key = t.commodity || "Other";
+    const key = t.commodity.split("-")[0].trim() || "Other";
     commodityMap.set(key, (commodityMap.get(key) || 0) + t.usdInvoice);
   });
   const pieData = Array.from(commodityMap.entries()).map(([name, value]) => ({
     name,
     value,
-  }));
-
-  // Chart data: trade-level MTM P&L
-  const barData = trades.map((t) => ({
-    name: t.tradeId,
-    pnl: Math.round((t.mtbFx - fx.spot) * t.usdInvoice),
-    exposure: t.usdInvoice,
   }));
 
   // Maturity timeline
@@ -156,7 +161,7 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="card">
           <div className="stat-label">Total USD Exposure</div>
           <div className="stat-value text-blue-400 mt-1">{formatUSD(totalUsd)}</div>
@@ -165,7 +170,6 @@ export default function DashboardPage() {
         <div className="card">
           <div className="stat-label">Expected INR Receipts</div>
           <div className="stat-value text-cyan-400 mt-1">{formatINR(totalInr)}</div>
-          <div className="text-xs text-slate-500 mt-1">Total INR sales value</div>
         </div>
         <div className="card">
           <div className="stat-label">Blended Book Rate</div>
@@ -173,42 +177,50 @@ export default function DashboardPage() {
             {blendedMtb.toFixed(4)}
           </div>
           <div className="text-xs text-slate-500 mt-1">
-            Spot: {fx.spot.toFixed(4)} | Delta: {(blendedMtb - fx.spot).toFixed(4)}
+            Spot: {fx.spot.toFixed(4)}
           </div>
         </div>
         <div className="card">
-          <div className="stat-label">MTM P&L (vs Book)</div>
-          <div className={`stat-value mt-1 ${mtmPnlInr >= 0 ? "text-green-400" : "text-red-400"}`}>
-            {formatINR(mtmPnlInr)}
+          <div className="stat-label">MTB / MTM Totals</div>
+          <div className="stat-value text-slate-200 mt-1">
+            {formatUSD(totalMtb)} / {formatUSD(totalMtm)}
+          </div>
+        </div>
+        <div className="card">
+          <div className="stat-label">FX Loss/Gain</div>
+          <div className={`stat-value mt-1 ${fxGainLoss >= 0 ? "text-green-400" : "text-red-400"}`}>
+            {fxGainLoss >= 0 ? "+" : ""}{formatUSD(fxGainLoss)}
           </div>
           <div className="mt-1">
-            <PnlBadge value={mtmPnlInr} format="INR" />
+            <PnlBadge value={fxGainLoss} format="USD" />
           </div>
         </div>
       </div>
 
       {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Trade-level P&L bar chart */}
+        {/* Trade-level FX P&L bar chart */}
         <div className="card">
           <h3 className="text-sm font-semibold text-slate-300 mb-4">
-            Trade-Level MTM P&L (INR)
+            FX P&L by Trade (MTM - MTB)
           </h3>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={barData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a3650" />
               <XAxis
                 dataKey="name"
-                tick={{ fill: "#94a3b8", fontSize: 10 }}
+                tick={{ fill: "#94a3b8", fontSize: 9 }}
                 axisLine={{ stroke: "#2a3650" }}
+                angle={-20}
+                textAnchor="end"
+                height={60}
               />
               <YAxis
                 tick={{ fill: "#94a3b8", fontSize: 11 }}
                 axisLine={{ stroke: "#2a3650" }}
                 tickFormatter={(v) => {
-                  if (Math.abs(v) >= 1e5) return `${(v / 1e5).toFixed(0)}L`;
-                  if (Math.abs(v) >= 1e3) return `${(v / 1e3).toFixed(0)}K`;
-                  return v;
+                  if (Math.abs(v) >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
+                  return `$${v}`;
                 }}
               />
               <Tooltip
@@ -218,7 +230,7 @@ export default function DashboardPage() {
                   borderRadius: 8,
                   color: "#f1f5f9",
                 }}
-                formatter={(value: number) => [formatINR(value), "MTM P&L"]}
+                formatter={(value: number) => [formatUSD(value), "FX P&L"]}
               />
               <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
                 {barData.map((entry, idx) => (

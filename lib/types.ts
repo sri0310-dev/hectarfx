@@ -3,12 +3,16 @@
 export type Trade = {
   tradeId: string;
   commodity: string;
-  usdInvoice: number;       // USD purchase invoice amount (exposure)
-  inrSale: number;           // INR sale proceeds
-  inrSaleDate: string;       // YYYY-MM-DD expected receipt
-  mtbFx: number;             // marked-to-book USDINR rate
-  mtmFx?: number;            // marked-to-market USDINR rate (current)
-  notes?: string;
+  quantityMt: number;        // Quantity in metric tons
+  arrivalDate: string;       // YYYY-MM-DD arrival date
+  usdInvoice: number;        // USD purchase invoice amount (exposure)
+  inrSale: number;            // INR sale proceeds
+  inrSaleDate: string;        // YYYY-MM-DD expected INR receipt
+  mtbFx: number;              // marked-to-book USDINR rate (computed: mtbInr / usdInvoice)
+  mtmFx?: number;             // marked-to-market USDINR rate (computed: mtmInr / usdInvoice)
+  mtbInr: number;             // Marked to Book INR amount (from sheet)
+  mtmInr: number;             // Marked to Market INR amount (from sheet)
+  hedgeStrategy?: string;     // Hedge strategy from sheet
 };
 
 export type FxBoard = {

@@ -5,7 +5,7 @@ import { FxBoard } from "@/lib/types";
 // In production, this would pull from a bank feed or market data API.
 // For MVP, we use manually-set rates that can be updated via POST.
 let currentFx: FxBoard = {
-  spot: 86.20,
+  spot: 90.2912,
   fwd1m: 0,
   fwd2m: 0,
   fwd3m: 0,
