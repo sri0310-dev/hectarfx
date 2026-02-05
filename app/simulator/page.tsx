@@ -49,6 +49,16 @@ function formatUSD(n: number): string {
   return `$${n.toFixed(0)}`;
 }
 
+// Extract base commodity: "Almonds - Crown" → "Almonds", "Soybean-MOI 1" → "Soybean"
+function baseCommodity(c: string): string {
+  const base = c.split(/[-–]/)[0].trim();
+  // Normalize common names
+  if (/^almond/i.test(base)) return "Almonds";
+  if (/^soy/i.test(base)) return "Soybean";
+  if (/^rcn/i.test(base)) return "RCN";
+  return base;
+}
+
 let simIdCounter = 1;
 
 export default function SimulatorPage() {
@@ -58,13 +68,9 @@ export default function SimulatorPage() {
   const [scenarioSpot, setScenarioSpot] = useState("");
   const [loading, setLoading] = useState(true);
 
-  // Active hedges from API (persistent)
   const [activeHedges, setActiveHedges] = useState<ActiveHedge[]>([]);
-
-  // Simulation hedges (temporary, on top of active)
   const [simHedges, setSimHedges] = useState<SimHedge[]>([]);
 
-  // Trade selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectionApplied, setSelectionApplied] = useState(false);
   const [selectBy, setSelectBy] = useState<"manual" | "month" | "commodity">("manual");
@@ -75,10 +81,7 @@ export default function SimulatorPage() {
     try {
       const res = await fetch("/api/fx");
       const data = await res.json();
-      if (data.fx?.spot) {
-        setLiveSpot(data.fx.spot);
-        setFxSource(data.source || "");
-      }
+      if (data.fx?.spot) { setLiveSpot(data.fx.spot); setFxSource(data.source || ""); }
     } catch { /* silent */ }
   }, []);
 
@@ -96,12 +99,11 @@ export default function SimulatorPage() {
       setActiveHedges((hd.hedges || []).filter((h: ActiveHedge) => h.status === "ACTIVE"));
       setLoading(false);
     });
-
     const interval = setInterval(fetchFx, 60_000);
     return () => clearInterval(interval);
   }, [fetchFx]);
 
-  // ── Simulation hedge management ──
+  // Sim hedge management
   function addSimHedge() {
     setSimHedges((prev) => [...prev, { id: simIdCounter++, amountInr: "0", rate: "0", expiry: "" }]);
   }
@@ -112,166 +114,154 @@ export default function SimulatorPage() {
     setSimHedges((prev) => prev.map((h) => (h.id === id ? { ...h, [field]: value } : h)));
   }
 
-  // ── Trade selection ──
-  function toggleTrade(tradeId: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(tradeId)) next.delete(tradeId);
-      else next.add(tradeId);
-      return next;
-    });
+  // Trade selection
+  function toggleTrade(tid: string) {
+    setSelectedIds((prev) => { const n = new Set(prev); if (n.has(tid)) n.delete(tid); else n.add(tid); return n; });
   }
   function selectAll() { setSelectedIds(new Set(trades.map((t) => t.tradeId))); }
   function clearSelection() { setSelectedIds(new Set()); setSelectionApplied(false); }
   function applySelection() { setSelectionApplied(selectedIds.size > 0); }
 
-  // Filter by month or commodity
   function applyFilter() {
     if (selectBy === "month" && filterMonth) {
       const ids = trades.filter((t) => t.inrSaleDate.startsWith(filterMonth)).map((t) => t.tradeId);
-      setSelectedIds(new Set(ids));
-      setSelectionApplied(ids.length > 0);
+      setSelectedIds(new Set(ids)); setSelectionApplied(ids.length > 0);
     } else if (selectBy === "commodity" && filterCommodity) {
-      const ids = trades.filter((t) => t.commodity.toLowerCase().includes(filterCommodity.toLowerCase())).map((t) => t.tradeId);
-      setSelectedIds(new Set(ids));
-      setSelectionApplied(ids.length > 0);
+      const ids = trades.filter((t) => baseCommodity(t.commodity) === filterCommodity).map((t) => t.tradeId);
+      setSelectedIds(new Set(ids)); setSelectionApplied(ids.length > 0);
     }
   }
 
-  // Available months & commodities
   const availableMonths = useMemo(() => {
-    const months = new Set<string>();
-    trades.forEach((t) => { if (t.inrSaleDate) months.add(t.inrSaleDate.slice(0, 7)); });
-    return Array.from(months).sort();
+    const s = new Set<string>();
+    trades.forEach((t) => { if (t.inrSaleDate) s.add(t.inrSaleDate.slice(0, 7)); });
+    return Array.from(s).sort();
   }, [trades]);
 
+  // Base commodity names for filter (Almonds, Soybean, RCN)
   const availableCommodities = useMemo(() => {
-    const comms = new Set<string>();
-    trades.forEach((t) => comms.add(t.commodity));
-    return Array.from(comms).sort();
+    const s = new Set<string>();
+    trades.forEach((t) => s.add(baseCommodity(t.commodity)));
+    return Array.from(s).sort();
   }, [trades]);
 
   const effectiveSpot = Number(scenarioSpot) || liveSpot;
 
   const scopeTrades = useMemo(() => {
-    if (selectionApplied && selectedIds.size > 0) {
-      return trades.filter((t) => selectedIds.has(t.tradeId));
-    }
+    if (selectionApplied && selectedIds.size > 0) return trades.filter((t) => selectedIds.has(t.tradeId));
     return trades;
   }, [trades, selectedIds, selectionApplied]);
 
-  // ── Combined hedge allocation: active hedges + simulation hedges ──
+  // Combined hedge allocation + MTB-focused analysis
   const analysis = useMemo(() => {
     if (scopeTrades.length === 0) return null;
 
     const sorted = [...scopeTrades].sort((a, b) => a.inrSaleDate.localeCompare(b.inrSaleDate));
 
-    // Combine active hedges + sim hedges into a single allocation list
-    const allHedges: { amountInr: number; rate: number; expiry: string; source: string }[] = [];
-
-    // Active hedges first (persistent bank contracts)
+    // Build hedge list: active first, then simulation
+    const allHedges: { amountInr: number; rate: number; expiry: string }[] = [];
     activeHedges.forEach((h) => {
-      if (h.status === "ACTIVE") {
-        allHedges.push({
-          amountInr: h.inrAmount,
-          rate: h.rate,
-          expiry: h.settlementDate,
-          source: "active",
-        });
-      }
+      if (h.status === "ACTIVE") allHedges.push({ amountInr: h.inrAmount, rate: h.rate, expiry: h.settlementDate });
     });
-
-    // Simulation hedges on top
     simHedges.forEach((h) => {
       const amt = Math.max(Number(h.amountInr) || 0, 0);
       const rate = Number(h.rate) || 0;
-      if (amt > 0 && rate > 0) {
-        allHedges.push({ amountInr: amt, rate, expiry: h.expiry || "", source: "sim" });
-      }
+      if (amt > 0 && rate > 0) allHedges.push({ amountInr: amt, rate, expiry: h.expiry || "" });
     });
 
     // Per-trade allocation
-    const tradeAllocs: Map<string, { hedgedInr: number; hedgedUsd: number }> = new Map();
-    sorted.forEach((t) => tradeAllocs.set(t.tradeId, { hedgedInr: 0, hedgedUsd: 0 }));
+    const allocs: Map<string, { hedgedInr: number; hedgedUsd: number }> = new Map();
+    sorted.forEach((t) => allocs.set(t.tradeId, { hedgedInr: 0, hedgedUsd: 0 }));
 
     for (const hedge of allHedges) {
-      let remaining = hedge.amountInr;
+      let rem = hedge.amountInr;
       for (const trade of sorted) {
-        if (remaining <= 0) break;
+        if (rem <= 0) break;
         if (hedge.expiry && trade.inrSaleDate > hedge.expiry) continue;
-        const alloc = tradeAllocs.get(trade.tradeId)!;
-        const tradeUnhedged = trade.inrSale - alloc.hedgedInr;
-        if (tradeUnhedged <= 0) continue;
-        const allocAmount = Math.min(remaining, tradeUnhedged);
-        alloc.hedgedInr += allocAmount;
-        alloc.hedgedUsd += hedge.rate > 0 ? allocAmount / hedge.rate : 0;
-        remaining -= allocAmount;
+        const a = allocs.get(trade.tradeId)!;
+        const unhedged = trade.inrSale - a.hedgedInr;
+        if (unhedged <= 0) continue;
+        const take = Math.min(rem, unhedged);
+        a.hedgedInr += take;
+        a.hedgedUsd += hedge.rate > 0 ? take / hedge.rate : 0;
+        rem -= take;
       }
     }
 
     const tradeResults = sorted.map((t) => {
-      const alloc = tradeAllocs.get(t.tradeId)!;
-      const unhedgedInr = t.inrSale - alloc.hedgedInr;
+      const a = allocs.get(t.tradeId)!;
+      const unhedgedInr = t.inrSale - a.hedgedInr;
+      // USD at Book = what the trader expected (INR receivable / MTB rate)
+      const usdAtBook = t.mtbFx > 0 ? t.inrSale / t.mtbFx : 0;
+      // USD at scenario (unhedged, no hedges)
       const usdUnhedged = effectiveSpot > 0 ? t.inrSale / effectiveSpot : 0;
-      const usdWithHedge = alloc.hedgedUsd + (effectiveSpot > 0 ? unhedgedInr / effectiveSpot : 0);
-      const deltaUsd = usdWithHedge - usdUnhedged;
+      // USD at scenario with hedges
+      const usdWithHedge = a.hedgedUsd + (effectiveSpot > 0 ? unhedgedInr / effectiveSpot : 0);
+      // P&L vs Book (North Star): positive = beating the book rate
+      const pnlVsBook = usdWithHedge - usdAtBook;
+      // Hedge benefit: difference hedges make vs pure unhedged at scenario
+      const hedgeBenefit = usdWithHedge - usdUnhedged;
 
       return {
         ...t,
-        hedgedInr: alloc.hedgedInr,
+        baseCommodity: baseCommodity(t.commodity),
+        hedgedInr: a.hedgedInr,
+        usdAtBook,
         usdUnhedged,
         usdWithHedge,
-        deltaUsd,
+        pnlVsBook,
+        hedgeBenefit,
       };
     });
 
     const totalInr = tradeResults.reduce((s, t) => s + t.inrSale, 0);
     const totalHedgedInr = tradeResults.reduce((s, t) => s + t.hedgedInr, 0);
-    const totalUsdUnhedged = tradeResults.reduce((s, t) => s + t.usdUnhedged, 0);
+    const totalUsdAtBook = tradeResults.reduce((s, t) => s + t.usdAtBook, 0);
     const totalUsdWithHedge = tradeResults.reduce((s, t) => s + t.usdWithHedge, 0);
-    const hedgeBenefitUsd = totalUsdWithHedge - totalUsdUnhedged;
-    const effectiveAvgRate = totalUsdWithHedge > 0 ? totalInr / totalUsdWithHedge : effectiveSpot;
+    const totalPnlVsBook = tradeResults.reduce((s, t) => s + t.pnlVsBook, 0);
+    const totalHedgeBenefit = tradeResults.reduce((s, t) => s + t.hedgeBenefit, 0);
     const totalUsdExposure = tradeResults.reduce((s, t) => s + t.usdInvoice, 0);
     const blendedMtb = totalUsdExposure > 0
       ? tradeResults.reduce((s, t) => s + t.mtbFx * t.usdInvoice, 0) / totalUsdExposure : 0;
+    const effectiveAvgRate = totalUsdWithHedge > 0 ? totalInr / totalUsdWithHedge : effectiveSpot;
+
+    // Weighted avg hedge rate
+    const totalHedgeUsd = activeHedges.filter((h) => h.status === "ACTIVE").reduce((s, h) => s + h.usdAmount, 0);
+    const weightedAvgHedgeRate = totalHedgeUsd > 0
+      ? activeHedges.filter((h) => h.status === "ACTIVE").reduce((s, h) => s + h.rate * h.usdAmount, 0) / totalHedgeUsd : 0;
 
     return {
       tradeResults,
       totalInr,
       totalHedgedInr,
-      totalUsdUnhedged,
+      totalUsdAtBook,
       totalUsdWithHedge,
-      hedgeBenefitUsd,
+      totalPnlVsBook,
+      totalHedgeBenefit,
       effectiveAvgRate,
       blendedMtb,
       totalUsdExposure,
+      weightedAvgHedgeRate,
       scopeLabel: selectionApplied && selectedIds.size > 0 ? `Selected: ${selectedIds.size}` : "All trades",
     };
   }, [scopeTrades, activeHedges, simHedges, effectiveSpot, selectionApplied, selectedIds.size]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-slate-400">Loading simulator...</div>
-      </div>
-    );
+    return <div className="flex items-center justify-center h-96"><div className="text-slate-400">Loading simulator...</div></div>;
   }
-
   if (!analysis) return null;
-
-  const totalDeltaUsd = analysis.tradeResults.reduce((s, t) => s + t.deltaUsd, 0);
 
   return (
     <div className="max-w-[1400px]">
       <div className="mb-4">
-        <h1 className="text-2xl font-bold text-white">Simulator</h1>
-        <p className="text-sm text-slate-400 mt-1">
+        <h1 className="text-xl md:text-2xl font-bold text-white">Simulator</h1>
+        <p className="text-xs md:text-sm text-slate-400 mt-1">
           {trades.length} trades &middot; {formatUSD(analysis.totalUsdExposure)} exposure
           &middot; {activeHedges.length} active hedge{activeHedges.length !== 1 ? "s" : ""}
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-5">
         {/* ═══ LEFT PANE ═══ */}
         <div className="lg:col-span-4 space-y-3">
 
@@ -288,6 +278,14 @@ export default function SimulatorPage() {
                 <div className="text-right">
                   <span className="font-mono text-sm font-bold text-cyan-400">{liveSpot.toFixed(4)}</span>
                   {fxSource && <span className="text-[9px] text-slate-600 ml-1">({fxSource})</span>}
+                </div>
+              </div>
+              <div className="border-t border-[#2a3650]/50 pt-1.5">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-slate-400">vs Book P&L</span>
+                  <span className={`font-mono text-sm font-bold ${analysis.totalPnlVsBook >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {analysis.totalPnlVsBook >= 0 ? "+" : ""}{formatUSD(analysis.totalPnlVsBook)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -329,15 +327,13 @@ export default function SimulatorPage() {
             </div>
           </div>
 
-          {/* Active Hedges (read-only) */}
+          {/* Active Hedges */}
           <div className="card py-3 px-4">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                 Active Hedges ({activeHedges.length})
               </h3>
-              <Link href="/hedges" className="text-[10px] text-blue-400 hover:text-blue-300">
-                Manage &rarr;
-              </Link>
+              <Link href="/hedges" className="text-[10px] text-blue-400 hover:text-blue-300">Manage &rarr;</Link>
             </div>
             {activeHedges.length > 0 ? (
               <div className="space-y-1.5">
@@ -352,30 +348,21 @@ export default function SimulatorPage() {
                   </div>
                 ))}
                 <div className="text-[10px] text-slate-600 pt-1">
-                  Total: {formatINR(activeHedges.reduce((s, h) => s + h.inrAmount, 0))} locked
+                  Total: {formatINR(activeHedges.reduce((s, h) => s + h.inrAmount, 0))} @ {analysis.weightedAvgHedgeRate.toFixed(4)} avg
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-slate-600">No active hedges.{" "}
-                <Link href="/hedges" className="text-blue-400">Add one</Link>
-              </p>
+              <p className="text-xs text-slate-600">No active hedges. <Link href="/hedges" className="text-blue-400">Add one</Link></p>
             )}
           </div>
 
           {/* Simulation Hedges */}
           <div className="card py-3 px-4">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                Simulation Hedges
-              </h3>
-              <button onClick={addSimHedge} className="text-[10px] text-blue-400 hover:text-blue-300 border border-blue-500/30 rounded px-1.5 py-0.5">
-                + Add
-              </button>
+              <h3 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Simulation Hedges</h3>
+              <button onClick={addSimHedge} className="text-[10px] text-blue-400 hover:text-blue-300 border border-blue-500/30 rounded px-1.5 py-0.5">+ Add</button>
             </div>
-            <p className="text-[10px] text-slate-600 mb-2">
-              Additional what-if hedges on top of active contracts.
-            </p>
-            {simHedges.length > 0 && (
+            {simHedges.length > 0 ? (
               <>
                 <div className="grid grid-cols-[1fr_1fr_1fr_20px] gap-1.5 mb-1.5">
                   <span className="text-[9px] text-slate-600 uppercase">INR Amt</span>
@@ -392,12 +379,11 @@ export default function SimulatorPage() {
                   </div>
                 ))}
               </>
+            ) : (
+              <p className="text-[10px] text-slate-600 italic">None. Click &quot;+ Add&quot; for what-if hedges.</p>
             )}
-            {simHedges.length === 0 && (
-              <p className="text-[10px] text-slate-600 italic">None. Click &quot;+ Add&quot; to simulate additional hedges.</p>
-            )}
-            <p className="text-[9px] text-slate-600 mt-2 leading-relaxed">
-              Allocation: <strong className="text-slate-400">top-to-bottom</strong>, covering <strong className="text-slate-400">earliest receipts first</strong> up to hedge expiry.
+            <p className="text-[9px] text-slate-600 mt-2">
+              Hedges allocated <strong className="text-slate-400">top-to-bottom</strong>, <strong className="text-slate-400">earliest receipts first</strong>.
             </p>
           </div>
         </div>
@@ -405,7 +391,7 @@ export default function SimulatorPage() {
         {/* ═══ RIGHT PANE ═══ */}
         <div className="lg:col-span-8 space-y-3">
 
-          {/* Compact Results (20% of real estate) */}
+          {/* Compact Results */}
           <div className="card py-3 px-4">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs font-semibold text-slate-300">Results</h3>
@@ -413,47 +399,56 @@ export default function SimulatorPage() {
                 {analysis.scopeLabel}
               </span>
             </div>
-            <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+            <div className="grid grid-cols-3 md:grid-cols-7 gap-2 md:gap-3">
               <div>
-                <div className="text-[9px] text-slate-500 uppercase">INR Receivables</div>
-                <div className="text-sm font-bold text-amber-400 font-mono">{formatINR(analysis.totalInr)}</div>
+                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">INR Receivables</div>
+                <div className="text-xs md:text-sm font-bold text-amber-400 font-mono">{formatINR(analysis.totalInr)}</div>
               </div>
               <div>
-                <div className="text-[9px] text-slate-500 uppercase">INR Hedged</div>
-                <div className="text-sm font-bold text-cyan-400 font-mono">{formatINR(analysis.totalHedgedInr)}</div>
+                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">INR Hedged</div>
+                <div className="text-xs md:text-sm font-bold text-cyan-400 font-mono">{formatINR(analysis.totalHedgedInr)}</div>
+                {analysis.weightedAvgHedgeRate > 0 && (
+                  <div className="text-[8px] text-slate-600 font-mono">@ {analysis.weightedAvgHedgeRate.toFixed(2)}</div>
+                )}
               </div>
               <div>
-                <div className="text-[9px] text-slate-500 uppercase">USD Unhedged</div>
-                <div className="text-sm font-bold text-slate-200 font-mono">{formatUSD(analysis.totalUsdUnhedged)}</div>
+                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">USD at Book</div>
+                <div className="text-xs md:text-sm font-bold text-slate-300 font-mono">{formatUSD(analysis.totalUsdAtBook)}</div>
               </div>
               <div>
-                <div className="text-[9px] text-slate-500 uppercase">USD w/ Hedge</div>
-                <div className="text-sm font-bold text-slate-200 font-mono">{formatUSD(analysis.totalUsdWithHedge)}</div>
+                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">USD at Scenario</div>
+                <div className="text-xs md:text-sm font-bold text-slate-200 font-mono">{formatUSD(analysis.totalUsdWithHedge)}</div>
               </div>
               <div>
-                <div className="text-[9px] text-slate-500 uppercase">Hedge Benefit</div>
-                <div className={`text-sm font-bold font-mono ${analysis.hedgeBenefitUsd >= 0 ? "text-green-400" : "text-red-400"}`}>
-                  {analysis.hedgeBenefitUsd >= 0 ? "+" : ""}{formatUSD(analysis.hedgeBenefitUsd)}
+                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">vs Book P&L</div>
+                <div className={`text-xs md:text-sm font-bold font-mono ${analysis.totalPnlVsBook >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {analysis.totalPnlVsBook >= 0 ? "+" : ""}{formatUSD(analysis.totalPnlVsBook)}
                 </div>
               </div>
               <div>
-                <div className="text-[9px] text-slate-500 uppercase">Eff. Rate</div>
-                <div className="text-sm font-bold text-cyan-400 font-mono">{analysis.effectiveAvgRate.toFixed(4)}</div>
+                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">Hedge Benefit</div>
+                <div className={`text-xs md:text-sm font-bold font-mono ${analysis.totalHedgeBenefit >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {analysis.totalHedgeBenefit >= 0 ? "+" : ""}{formatUSD(analysis.totalHedgeBenefit)}
+                </div>
+              </div>
+              <div>
+                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">Eff. Rate</div>
+                <div className="text-xs md:text-sm font-bold text-cyan-400 font-mono">{analysis.effectiveAvgRate.toFixed(4)}</div>
               </div>
             </div>
           </div>
 
-          {/* Trade-Level View (dominant, ~80% of right pane) */}
+          {/* Trade-Level View */}
           <div className="card p-0 overflow-hidden">
-            <div className="px-4 py-3 border-b border-[#2a3650]">
-              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-3">Trade-Level View</div>
+            <div className="px-3 md:px-4 py-3 border-b border-[#2a3650]">
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Trade-Level View</div>
 
-              {/* Filter controls */}
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400">Select by</span>
+              {/* Filter controls - stacks on mobile */}
+              <div className="flex flex-wrap items-center gap-2 md:gap-3">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] md:text-xs text-slate-400">Select by</span>
                   <select
-                    className="input-field text-xs py-1 px-2 w-auto"
+                    className="input-field text-[10px] md:text-xs py-1 px-1.5 md:px-2 w-auto"
                     value={selectBy}
                     onChange={(e) => setSelectBy(e.target.value as "manual" | "month" | "commodity")}
                   >
@@ -464,140 +459,111 @@ export default function SimulatorPage() {
                 </div>
 
                 {selectBy === "month" && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">Month</span>
-                    <select
-                      className="input-field text-xs py-1 px-2 w-auto"
-                      value={filterMonth}
-                      onChange={(e) => setFilterMonth(e.target.value)}
-                    >
-                      <option value="">All months</option>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] md:text-xs text-slate-400">Month</span>
+                    <select className="input-field text-[10px] md:text-xs py-1 px-1.5 w-auto" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
+                      <option value="">All</option>
                       {availableMonths.map((m) => {
                         const d = new Date(m + "-01");
-                        const label = d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-                        return <option key={m} value={m}>{label}</option>;
+                        return <option key={m} value={m}>{d.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</option>;
                       })}
                     </select>
-                    <button onClick={applyFilter} className="text-xs px-2 py-1 rounded border border-blue-500 text-blue-400 hover:bg-blue-500/10">Apply</button>
+                    <button onClick={applyFilter} className="text-[10px] px-2 py-1 rounded border border-blue-500 text-blue-400">Apply</button>
                   </div>
                 )}
 
                 {selectBy === "commodity" && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">Commodity</span>
-                    <select
-                      className="input-field text-xs py-1 px-2 w-auto"
-                      value={filterCommodity}
-                      onChange={(e) => setFilterCommodity(e.target.value)}
-                    >
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] md:text-xs text-slate-400">Commodity</span>
+                    <select className="input-field text-[10px] md:text-xs py-1 px-1.5 w-auto" value={filterCommodity} onChange={(e) => setFilterCommodity(e.target.value)}>
                       <option value="">All</option>
                       {availableCommodities.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
-                    <button onClick={applyFilter} className="text-xs px-2 py-1 rounded border border-blue-500 text-blue-400 hover:bg-blue-500/10">Apply</button>
+                    <button onClick={applyFilter} className="text-[10px] px-2 py-1 rounded border border-blue-500 text-blue-400">Apply</button>
                   </div>
                 )}
 
-                <div className="flex items-center gap-2 ml-auto">
-                  <span className="text-xs font-mono text-slate-500 border border-[#2a3650] rounded px-2 py-0.5">
+                <div className="flex items-center gap-1.5 ml-auto">
+                  <span className="text-[10px] font-mono text-slate-500 border border-[#2a3650] rounded px-1.5 py-0.5">
                     Selected: {selectedIds.size}
                   </span>
-                  <button
-                    onClick={applySelection}
-                    disabled={selectedIds.size === 0}
-                    className={`text-xs px-2 py-1 rounded border transition-colors ${
-                      selectedIds.size > 0 ? "border-blue-500 text-blue-400 hover:bg-blue-500/10" : "border-[#2a3650] text-slate-600 cursor-not-allowed"
-                    }`}
-                  >Apply</button>
-                  <button onClick={clearSelection} className="text-xs px-2 py-1 rounded border border-[#2a3650] text-slate-500 hover:text-slate-300">Clear</button>
-                  <button onClick={selectAll} className="text-xs px-2 py-1 rounded border border-[#2a3650] text-slate-500 hover:text-slate-300">Select all</button>
+                  <button onClick={applySelection} disabled={selectedIds.size === 0}
+                    className={`text-[10px] px-2 py-1 rounded border ${selectedIds.size > 0 ? "border-blue-500 text-blue-400" : "border-[#2a3650] text-slate-600 cursor-not-allowed"}`}>Apply</button>
+                  <button onClick={clearSelection} className="text-[10px] px-2 py-1 rounded border border-[#2a3650] text-slate-500 hover:text-slate-300">Clear</button>
+                  <button onClick={selectAll} className="text-[10px] px-2 py-1 rounded border border-[#2a3650] text-slate-500 hover:text-slate-300">Select all</button>
                 </div>
               </div>
 
-              <p className="text-[9px] text-slate-600 mt-2">
-                If nothing is selected, scope automatically becomes <strong className="text-slate-400">All trades</strong>.
+              <p className="text-[8px] md:text-[9px] text-slate-600 mt-1.5">
+                If nothing selected, scope = <strong className="text-slate-400">All trades</strong>. North Star: beat the mark-to-book rate.
               </p>
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full min-w-[700px]">
                 <thead>
                   <tr className="border-b border-[#2a3650]">
-                    <th className="table-header w-8"></th>
-                    <th className="table-header">Commodity</th>
-                    <th className="table-header">INR Receipt Date</th>
-                    <th className="table-header text-right">INR Receivable</th>
-                    <th className="table-header text-right">Hedged INR</th>
-                    <th className="table-header text-right">USD (Unhedged)</th>
-                    <th className="table-header text-right">USD (With Hedge)</th>
-                    <th className="table-header text-right">&Delta; USD</th>
+                    <th className="table-header w-8 px-2 md:px-4"></th>
+                    <th className="table-header px-2 md:px-4">Commodity</th>
+                    <th className="table-header px-2 md:px-4">Receipt Date</th>
+                    <th className="table-header text-right px-2 md:px-4">INR Receivable</th>
+                    <th className="table-header text-right px-2 md:px-4">Hedged INR</th>
+                    <th className="table-header text-right px-2 md:px-4">USD at Book</th>
+                    <th className="table-header text-right px-2 md:px-4">USD at Scenario</th>
+                    <th className="table-header text-right px-2 md:px-4">vs Book</th>
+                    <th className="table-header text-right px-2 md:px-4">Hedge +/-</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#2a3650]/50">
                   {analysis.tradeResults.map((t) => (
-                    <tr
-                      key={t.tradeId}
-                      className={`hover:bg-[#1e2a3f] transition-colors ${
-                        selectedIds.has(t.tradeId) ? "bg-blue-500/5" : ""
-                      }`}
-                    >
-                      <td className="table-cell">
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(t.tradeId)}
-                          onChange={() => toggleTrade(t.tradeId)}
-                          className="accent-blue-500 w-3 h-3"
-                        />
+                    <tr key={t.tradeId} className={`hover:bg-[#1e2a3f] transition-colors ${selectedIds.has(t.tradeId) ? "bg-blue-500/5" : ""}`}>
+                      <td className="table-cell px-2 md:px-4">
+                        <input type="checkbox" checked={selectedIds.has(t.tradeId)} onChange={() => toggleTrade(t.tradeId)} className="accent-blue-500 w-3 h-3" />
                       </td>
-                      <td className="table-cell text-slate-200 text-xs">
-                        {t.commodity.length > 20 ? t.commodity.slice(0, 20) + "..." : t.commodity}
+                      <td className="table-cell text-slate-200 text-xs px-2 md:px-4">{t.baseCommodity}</td>
+                      <td className="table-cell font-mono text-slate-400 text-xs px-2 md:px-4">{t.inrSaleDate}</td>
+                      <td className="table-cell font-mono text-amber-400 text-xs text-right px-2 md:px-4">{formatINR(t.inrSale)}</td>
+                      <td className="table-cell font-mono text-xs text-right px-2 md:px-4">
+                        <span className={t.hedgedInr > 0 ? "text-green-400" : "text-slate-600"}>{formatINR(t.hedgedInr)}</span>
                       </td>
-                      <td className="table-cell font-mono text-slate-400 text-xs">{t.inrSaleDate}</td>
-                      <td className="table-cell font-mono text-amber-400 text-xs text-right">{formatINR(t.inrSale)}</td>
-                      <td className="table-cell font-mono text-xs text-right">
-                        <span className={t.hedgedInr > 0 ? "text-green-400" : "text-slate-600"}>
-                          {formatINR(t.hedgedInr)}
-                        </span>
+                      <td className="table-cell font-mono text-slate-400 text-xs text-right px-2 md:px-4">{formatUSD(t.usdAtBook)}</td>
+                      <td className="table-cell font-mono text-slate-200 text-xs text-right px-2 md:px-4">{formatUSD(t.usdWithHedge)}</td>
+                      <td className={`table-cell font-mono text-xs text-right font-semibold px-2 md:px-4 ${t.pnlVsBook > 0.5 ? "text-green-400" : t.pnlVsBook < -0.5 ? "text-red-400" : "text-slate-600"}`}>
+                        {t.pnlVsBook > 0.5 ? "+" : ""}{Math.abs(t.pnlVsBook) < 0.5 ? "$0" : formatUSD(t.pnlVsBook)}
                       </td>
-                      <td className="table-cell font-mono text-slate-300 text-xs text-right">{formatUSD(t.usdUnhedged)}</td>
-                      <td className="table-cell font-mono text-slate-200 text-xs text-right">{formatUSD(t.usdWithHedge)}</td>
-                      <td className={`table-cell font-mono text-xs text-right font-semibold ${
-                        t.deltaUsd > 0.5 ? "text-green-400" : t.deltaUsd < -0.5 ? "text-red-400" : "text-slate-600"
-                      }`}>
-                        {t.deltaUsd > 0.5 ? "+" : t.deltaUsd < -0.5 ? "-" : ""}
-                        {Math.abs(t.deltaUsd) < 0.5 ? "$0" : formatUSD(Math.abs(t.deltaUsd))}
+                      <td className={`table-cell font-mono text-xs text-right px-2 md:px-4 ${t.hedgeBenefit > 0.5 ? "text-green-400" : t.hedgeBenefit < -0.5 ? "text-red-400" : "text-slate-600"}`}>
+                        {t.hedgeBenefit > 0.5 ? "+" : ""}{Math.abs(t.hedgeBenefit) < 0.5 ? "$0" : formatUSD(t.hedgeBenefit)}
                       </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 border-[#2a3650] bg-[#111827]">
-                    <td className="table-cell" colSpan={3}>
+                    <td className="table-cell px-2 md:px-4" colSpan={3}>
                       <span className="text-xs font-semibold text-slate-400">Total ({analysis.tradeResults.length})</span>
                     </td>
-                    <td className="table-cell font-mono text-amber-400 text-xs text-right font-bold">{formatINR(analysis.totalInr)}</td>
-                    <td className="table-cell font-mono text-xs text-right font-bold">
+                    <td className="table-cell font-mono text-amber-400 text-xs text-right font-bold px-2 md:px-4">{formatINR(analysis.totalInr)}</td>
+                    <td className="table-cell font-mono text-xs text-right font-bold px-2 md:px-4">
                       <span className={analysis.totalHedgedInr > 0 ? "text-green-400" : "text-slate-600"}>{formatINR(analysis.totalHedgedInr)}</span>
                     </td>
-                    <td className="table-cell font-mono text-slate-300 text-xs text-right font-bold">{formatUSD(analysis.totalUsdUnhedged)}</td>
-                    <td className="table-cell font-mono text-slate-200 text-xs text-right font-bold">{formatUSD(analysis.totalUsdWithHedge)}</td>
-                    <td className={`table-cell font-mono text-xs text-right font-bold ${
-                      totalDeltaUsd > 0.5 ? "text-green-400" : totalDeltaUsd < -0.5 ? "text-red-400" : "text-slate-600"
-                    }`}>
-                      {totalDeltaUsd > 0.5 ? "+" : totalDeltaUsd < -0.5 ? "-" : ""}
-                      {Math.abs(totalDeltaUsd) < 0.5 ? "$0" : formatUSD(Math.abs(totalDeltaUsd))}
+                    <td className="table-cell font-mono text-slate-400 text-xs text-right font-bold px-2 md:px-4">{formatUSD(analysis.totalUsdAtBook)}</td>
+                    <td className="table-cell font-mono text-slate-200 text-xs text-right font-bold px-2 md:px-4">{formatUSD(analysis.totalUsdWithHedge)}</td>
+                    <td className={`table-cell font-mono text-xs text-right font-bold px-2 md:px-4 ${analysis.totalPnlVsBook >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {analysis.totalPnlVsBook >= 0 ? "+" : ""}{formatUSD(analysis.totalPnlVsBook)}
+                    </td>
+                    <td className={`table-cell font-mono text-xs text-right font-bold px-2 md:px-4 ${analysis.totalHedgeBenefit >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {analysis.totalHedgeBenefit >= 0 ? "+" : ""}{formatUSD(analysis.totalHedgeBenefit)}
                     </td>
                   </tr>
                 </tfoot>
               </table>
             </div>
 
-            <div className="px-4 py-2 border-t border-[#2a3650]/50">
-              <p className="text-[9px] text-slate-600">
-                &Delta; USD = (USD with hedge allocation) &ndash; (USD unhedged at scenario). Hedge applies only if receipt date &le; hedge expiry.
-              </p>
+            <div className="px-3 md:px-4 py-2 border-t border-[#2a3650]/50 text-[8px] md:text-[9px] text-slate-600">
+              <span className="font-semibold text-slate-500">vs Book</span> = USD at scenario (w/ hedges) &minus; USD at book rate. Positive = beating the trader&apos;s booked rate.{" "}
+              <span className="font-semibold text-slate-500">Hedge +/-</span> = benefit of hedges vs unhedged at scenario.
             </div>
           </div>
-
         </div>
       </div>
     </div>

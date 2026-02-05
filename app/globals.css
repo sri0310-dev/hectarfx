@@ -112,4 +112,8 @@ body {
   .pnl-negative {
     @apply text-red-400;
   }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
 }
