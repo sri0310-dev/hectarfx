@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
   BarChart,
@@ -13,7 +13,6 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from "recharts";
 import { PnlBadge } from "./components/PnlBadge";
 
@@ -37,6 +36,9 @@ type FxData = {
   fwd1m: number;
   fwd2m: number;
   fwd3m: number;
+  fwd6m?: number;
+  fwd12m?: number;
+  updatedAt?: string;
 };
 
 type Suggestion = {
@@ -67,8 +69,26 @@ function formatUSD(n: number): string {
 export default function DashboardPage() {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [fx, setFx] = useState<FxData | null>(null);
+  const [pairs, setPairs] = useState<Record<string, number>>({});
+  const [fxSource, setFxSource] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Toggles
+  const [maturityView, setMaturityView] = useState<"month" | "day">("month");
+  const [currencyUnit, setCurrencyUnit] = useState<"USD" | "INR">("USD");
+
+  const fetchFx = useCallback(async () => {
+    try {
+      const res = await fetch("/api/fx");
+      const data = await res.json();
+      if (data.fx) {
+        setFx(data.fx);
+        setPairs(data.pairs || {});
+        setFxSource(data.source || "");
+      }
+    } catch { /* silent */ }
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -77,6 +97,8 @@ export default function DashboardPage() {
     ]).then(([tradesData, fxData]) => {
       setTrades(tradesData.trades || []);
       setFx(fxData.fx);
+      setPairs(fxData.pairs || {});
+      setFxSource(fxData.source || "");
 
       if (tradesData.trades?.length && fxData.fx) {
         fetch("/api/suggestions", {
@@ -90,7 +112,11 @@ export default function DashboardPage() {
 
       setLoading(false);
     });
-  }, []);
+
+    // Auto-refresh FX every 60s
+    const interval = setInterval(fetchFx, 60_000);
+    return () => clearInterval(interval);
+  }, [fetchFx]);
 
   if (loading || !fx) {
     return (
@@ -100,47 +126,61 @@ export default function DashboardPage() {
     );
   }
 
+  const spot = fx.spot;
   const totalUsd = trades.reduce((s, t) => s + t.usdInvoice, 0);
   const totalInr = trades.reduce((s, t) => s + t.inrSale, 0);
   const totalMtb = trades.reduce((s, t) => s + t.mtbInr, 0);
   const totalMtm = trades.reduce((s, t) => s + t.mtmInr, 0);
   const fxGainLoss = totalMtm - totalMtb;
 
-  // Blended book rate from INR amounts
   const blendedMtb =
     totalUsd > 0
       ? trades.reduce((s, t) => s + t.mtbFx * t.usdInvoice, 0) / totalUsd
       : 0;
 
-  // Chart data: FX P&L per trade
-  const barData = trades.map((t) => ({
-    name: t.commodity.length > 15 ? t.commodity.slice(0, 15) + "..." : t.commodity,
-    pnl: t.mtmInr - t.mtbInr,
-    exposure: t.usdInvoice,
-  }));
+  // FX P&L per trade - in selected currency
+  const barData = trades.map((t) => {
+    const pnlUsd = t.mtmInr - t.mtbInr;
+    return {
+      name: t.commodity.length > 15 ? t.commodity.slice(0, 15) + "..." : t.commodity,
+      pnl: currencyUnit === "USD" ? pnlUsd : pnlUsd * spot,
+      exposure: currencyUnit === "USD" ? t.usdInvoice : t.usdInvoice * spot,
+    };
+  });
 
-  // Chart data: exposure by commodity
+  // Exposure by commodity
   const commodityMap = new Map<string, number>();
   trades.forEach((t) => {
     const key = t.commodity.split("-")[0].trim() || "Other";
-    commodityMap.set(key, (commodityMap.get(key) || 0) + t.usdInvoice);
+    const val = currencyUnit === "USD" ? t.usdInvoice : t.usdInvoice * spot;
+    commodityMap.set(key, (commodityMap.get(key) || 0) + val);
   });
   const pieData = Array.from(commodityMap.entries()).map(([name, value]) => ({
     name,
     value,
   }));
 
-  // Maturity timeline
-  const monthMap = new Map<string, number>();
+  // Maturity timeline - day or month view, USD or INR
+  const timelineMap = new Map<string, number>();
   trades.forEach((t) => {
-    if (t.inrSaleDate) {
-      const month = t.inrSaleDate.slice(0, 7);
-      monthMap.set(month, (monthMap.get(month) || 0) + t.usdInvoice);
-    }
+    if (!t.inrSaleDate) return;
+    const key = maturityView === "month" ? t.inrSaleDate.slice(0, 7) : t.inrSaleDate;
+    const val = currencyUnit === "USD" ? t.usdInvoice : t.usdInvoice * spot;
+    timelineMap.set(key, (timelineMap.get(key) || 0) + val);
   });
-  const maturityData = Array.from(monthMap.entries())
+  const maturityData = Array.from(timelineMap.entries())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, usd]) => ({ month, usd }));
+    .map(([label, amount]) => ({
+      label: maturityView === "day" ? label.slice(5) : label, // show MM-DD for day view
+      amount,
+    }));
+
+  const fmt = currencyUnit === "USD" ? formatUSD : formatINR;
+  const exposureFmt = currencyUnit === "USD" ? formatUSD(totalUsd) : formatINR(totalUsd * spot);
+  const inrReceiptsFmt = formatINR(totalInr);
+
+  // Multi-currency pairs
+  const pairEntries = Object.entries(pairs);
 
   return (
     <div className="space-y-6 max-w-7xl">
@@ -153,23 +193,66 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="text-right">
-          <div className="text-sm text-slate-400">USDINR Spot</div>
+          <div className="flex items-center gap-2 justify-end">
+            <div className="text-sm text-slate-400">USDINR Spot</div>
+            {fxSource && (
+              <span className="text-[10px] text-slate-600 px-1.5 py-0.5 rounded bg-[#1e2a3f]">
+                {fxSource}
+              </span>
+            )}
+          </div>
           <div className="text-2xl font-bold text-cyan-400">
-            {fx.spot.toFixed(4)}
+            {spot.toFixed(4)}
+          </div>
+          {fx.updatedAt && (
+            <div className="text-[10px] text-slate-600">
+              Updated {new Date(fx.updatedAt).toLocaleTimeString()}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Multi-currency rates bar */}
+      {pairEntries.length > 0 && (
+        <div className="flex gap-4 items-center">
+          {pairEntries.map(([pair, rate]) => (
+            <div key={pair} className="flex items-center gap-2 px-3 py-2 bg-[#111827] rounded-lg border border-[#2a3650]">
+              <span className="text-xs text-slate-400">{pair}</span>
+              <span className="font-mono text-sm text-slate-200">{rate.toFixed(4)}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 px-3 py-2 bg-[#111827] rounded-lg border border-[#2a3650]">
+            <span className="text-xs text-slate-400">USDINR</span>
+            <span className="font-mono text-sm text-cyan-400">{spot.toFixed(4)}</span>
           </div>
         </div>
+      )}
+
+      {/* Global toggles */}
+      <div className="flex items-center gap-3">
+        <select
+          value={currencyUnit}
+          onChange={(e) => setCurrencyUnit(e.target.value as "USD" | "INR")}
+          className="input-field text-xs py-1.5 px-3 w-auto"
+        >
+          <option value="USD">USD</option>
+          <option value="INR">INR</option>
+        </select>
+        <span className="text-[10px] text-slate-600">
+          Currency for exposure &amp; charts
+        </span>
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="card">
-          <div className="stat-label">Total USD Exposure</div>
-          <div className="stat-value text-blue-400 mt-1">{formatUSD(totalUsd)}</div>
+          <div className="stat-label">Total Exposure</div>
+          <div className="stat-value text-blue-400 mt-1">{exposureFmt}</div>
           <div className="text-xs text-slate-500 mt-1">{trades.length} active trades</div>
         </div>
         <div className="card">
           <div className="stat-label">Expected INR Receipts</div>
-          <div className="stat-value text-cyan-400 mt-1">{formatINR(totalInr)}</div>
+          <div className="stat-value text-cyan-400 mt-1">{inrReceiptsFmt}</div>
         </div>
         <div className="card">
           <div className="stat-label">Blended Book Rate</div>
@@ -177,7 +260,7 @@ export default function DashboardPage() {
             {blendedMtb.toFixed(4)}
           </div>
           <div className="text-xs text-slate-500 mt-1">
-            Spot: {fx.spot.toFixed(4)}
+            Spot: {spot.toFixed(4)}
           </div>
         </div>
         <div className="card">
@@ -202,7 +285,7 @@ export default function DashboardPage() {
         {/* Trade-level FX P&L bar chart */}
         <div className="card">
           <h3 className="text-sm font-semibold text-slate-300 mb-4">
-            FX P&L by Trade (MTM - MTB)
+            FX P&L by Trade (MTM - MTB) &middot; {currencyUnit}
           </h3>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={barData}>
@@ -218,10 +301,7 @@ export default function DashboardPage() {
               <YAxis
                 tick={{ fill: "#94a3b8", fontSize: 11 }}
                 axisLine={{ stroke: "#2a3650" }}
-                tickFormatter={(v) => {
-                  if (Math.abs(v) >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
-                  return `$${v}`;
-                }}
+                tickFormatter={(v) => fmt(v)}
               />
               <Tooltip
                 contentStyle={{
@@ -230,7 +310,7 @@ export default function DashboardPage() {
                   borderRadius: 8,
                   color: "#f1f5f9",
                 }}
-                formatter={(value: number) => [formatUSD(value), "FX P&L"]}
+                formatter={(value: number) => [fmt(value), "FX P&L"]}
               />
               <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
                 {barData.map((entry, idx) => (
@@ -247,7 +327,7 @@ export default function DashboardPage() {
         {/* Exposure by commodity pie chart */}
         <div className="card">
           <h3 className="text-sm font-semibold text-slate-300 mb-4">
-            Exposure by Commodity (USD)
+            Exposure by Commodity ({currencyUnit})
           </h3>
           <ResponsiveContainer width="100%" height={280}>
             <PieChart>
@@ -275,7 +355,7 @@ export default function DashboardPage() {
                   borderRadius: 8,
                   color: "#f1f5f9",
                 }}
-                formatter={(value: number) => [formatUSD(value), "Exposure"]}
+                formatter={(value: number) => [fmt(value), "Exposure"]}
               />
             </PieChart>
           </ResponsiveContainer>
@@ -284,21 +364,50 @@ export default function DashboardPage() {
 
       {/* Maturity timeline */}
       <div className="card">
-        <h3 className="text-sm font-semibold text-slate-300 mb-4">
-          Exposure Maturity Timeline (USD)
-        </h3>
-        <ResponsiveContainer width="100%" height={200}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-slate-300">
+            Exposure Maturity Timeline ({currencyUnit})
+          </h3>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg overflow-hidden border border-[#2a3650]">
+              <button
+                onClick={() => setMaturityView("month")}
+                className={`px-3 py-1 text-xs transition-colors ${
+                  maturityView === "month"
+                    ? "bg-blue-500/20 text-blue-400"
+                    : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                Month
+              </button>
+              <button
+                onClick={() => setMaturityView("day")}
+                className={`px-3 py-1 text-xs transition-colors ${
+                  maturityView === "day"
+                    ? "bg-blue-500/20 text-blue-400"
+                    : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                Day
+              </button>
+            </div>
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={220}>
           <BarChart data={maturityData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#2a3650" />
             <XAxis
-              dataKey="month"
-              tick={{ fill: "#94a3b8", fontSize: 11 }}
+              dataKey="label"
+              tick={{ fill: "#94a3b8", fontSize: maturityView === "day" ? 9 : 11 }}
               axisLine={{ stroke: "#2a3650" }}
+              angle={maturityView === "day" ? -30 : 0}
+              textAnchor={maturityView === "day" ? "end" : "middle"}
+              height={maturityView === "day" ? 50 : 30}
             />
             <YAxis
               tick={{ fill: "#94a3b8", fontSize: 11 }}
               axisLine={{ stroke: "#2a3650" }}
-              tickFormatter={(v) => formatUSD(v)}
+              tickFormatter={(v) => fmt(v)}
             />
             <Tooltip
               contentStyle={{
@@ -307,9 +416,9 @@ export default function DashboardPage() {
                 borderRadius: 8,
                 color: "#f1f5f9",
               }}
-              formatter={(value: number) => [formatUSD(value), "Maturing"]}
+              formatter={(value: number) => [fmt(value), "Maturing"]}
             />
-            <Bar dataKey="usd" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -373,16 +482,18 @@ export default function DashboardPage() {
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-slate-300">Forward Curve</h3>
-          <Link href="/fxboard" className="text-xs text-blue-400 hover:text-blue-300">
-            FX Board &rarr;
+          <Link href="/simulator" className="text-xs text-blue-400 hover:text-blue-300">
+            Simulator &rarr;
           </Link>
         </div>
-        <div className="grid grid-cols-5 gap-4">
+        <div className="grid grid-cols-4 md:grid-cols-7 gap-4">
           {[
             { label: "Spot", rate: fx.spot },
             { label: "1M Fwd", rate: fx.fwd1m },
             { label: "2M Fwd", rate: fx.fwd2m },
             { label: "3M Fwd", rate: fx.fwd3m },
+            ...(fx.fwd6m ? [{ label: "6M Fwd", rate: fx.fwd6m }] : []),
+            ...(fx.fwd12m ? [{ label: "12M Fwd", rate: fx.fwd12m }] : []),
           ].map((item) => (
             <div key={item.label} className="text-center">
               <div className="text-xs text-slate-500">{item.label}</div>
