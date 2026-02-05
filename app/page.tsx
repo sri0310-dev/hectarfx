@@ -212,21 +212,28 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Multi-currency rates bar */}
-      {pairEntries.length > 0 && (
-        <div className="flex gap-4 items-center">
+      {/* FX Rate Sources */}
+      <div className="card py-3 px-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Live FX Rates</h3>
+          <span className="text-[9px] text-slate-600">
+            Primary: Google Finance (Sheet J1) &middot; Closest to xe.com mid-market rates
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-3 items-center">
+          <div className="flex items-center gap-2 px-3 py-2 bg-[#111827] rounded-lg border border-cyan-500/30">
+            <span className="text-xs text-slate-400">USDINR</span>
+            <span className="font-mono text-sm text-cyan-400 font-bold">{spot.toFixed(4)}</span>
+            {fxSource && <span className="text-[9px] text-slate-600">{fxSource}</span>}
+          </div>
           {pairEntries.map(([pair, rate]) => (
             <div key={pair} className="flex items-center gap-2 px-3 py-2 bg-[#111827] rounded-lg border border-[#2a3650]">
               <span className="text-xs text-slate-400">{pair}</span>
               <span className="font-mono text-sm text-slate-200">{rate.toFixed(4)}</span>
             </div>
           ))}
-          <div className="flex items-center gap-2 px-3 py-2 bg-[#111827] rounded-lg border border-[#2a3650]">
-            <span className="text-xs text-slate-400">USDINR</span>
-            <span className="font-mono text-sm text-cyan-400">{spot.toFixed(4)}</span>
-          </div>
         </div>
-      )}
+      </div>
 
       {/* Global toggles */}
       <div className="flex items-center gap-3">
