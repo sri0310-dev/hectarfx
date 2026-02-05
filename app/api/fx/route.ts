@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
 import { forwardRate } from "@/lib/fx";
+import { fetchSpotFromSheet } from "@/lib/sheets";
 import { FxBoard } from "@/lib/types";
 
-// Live FX rate fetching from multiple free APIs (fallback chain)
-async function fetchLiveSpot(): Promise<{ rate: number; source: string } | null> {
+// ── Primary: Google Finance rate from the Google Sheet cell J1 ──
+async function fetchFromGoogleSheet(): Promise<{ rate: number; source: string } | null> {
+  try {
+    const rate = await fetchSpotFromSheet();
+    if (rate) return { rate, source: "Google Finance (Sheet)" };
+  } catch { /* fall through */ }
+  return null;
+}
+
+// ── Fallback: Free public APIs ──
+async function fetchFromFreeAPIs(): Promise<{ rate: number; source: string } | null> {
   const apis = [
     {
       name: "frankfurter",
@@ -50,7 +60,7 @@ async function fetchLiveSpot(): Promise<{ rate: number; source: string } | null>
   return null;
 }
 
-// Fetch multiple currency pairs
+// Fetch multiple currency pairs (for dashboard display)
 async function fetchMultiPairRates(): Promise<Record<string, number>> {
   const pairs: Record<string, number> = {};
   try {
@@ -62,7 +72,6 @@ async function fetchMultiPairRates(): Promise<Record<string, number>> {
       const data = await res.json();
       const rates = data.rates as Record<string, number>;
       if (rates?.INR) pairs["USDINR"] = rates.INR;
-      // Compute cross rates to INR
       if (rates?.EUR && rates?.INR) {
         pairs["EURINR"] = rates.INR / rates.EUR;
       }
@@ -70,18 +79,16 @@ async function fetchMultiPairRates(): Promise<Record<string, number>> {
         pairs["GBPINR"] = rates.INR / rates.GBP;
       }
     }
-  } catch {
-    // fallback
-  }
+  } catch { /* fallback */ }
   return pairs;
 }
 
-// Cache with 60-second TTL to avoid hammering free APIs
+// Cache with 60-second TTL
 let cachedFx: FxBoard | null = null;
 let cachedPairs: Record<string, number> = {};
 let cacheSource = "";
 let lastFetchTime = 0;
-const CACHE_TTL_MS = 60_000; // 60 seconds
+const CACHE_TTL_MS = 60_000;
 
 function computeForwards(spot: number): Partial<FxBoard> {
   return {
@@ -100,19 +107,24 @@ async function getLatestFx(): Promise<{ fx: FxBoard; pairs: Record<string, numbe
     return { fx: cachedFx, pairs: cachedPairs, source: cacheSource };
   }
 
-  // Try to fetch live rate
-  const [liveResult, pairResult] = await Promise.all([
-    fetchLiveSpot(),
-    fetchMultiPairRates(),
-  ]);
-
-  let spot = 90.2912; // fallback
+  // Priority chain: 1) Google Sheet J1 (Google Finance), 2) Free APIs, 3) Fallback
+  let spot = 90.2912;
   let source = "fallback";
 
-  if (liveResult) {
-    spot = liveResult.rate;
-    source = liveResult.source;
+  const sheetResult = await fetchFromGoogleSheet();
+  if (sheetResult) {
+    spot = sheetResult.rate;
+    source = sheetResult.source;
+  } else {
+    const apiResult = await fetchFromFreeAPIs();
+    if (apiResult) {
+      spot = apiResult.rate;
+      source = apiResult.source;
+    }
   }
+
+  // Fetch multi-pair rates in parallel (best effort)
+  const pairResult = await fetchMultiPairRates();
 
   const forwards = computeForwards(spot);
   const fx: FxBoard = {

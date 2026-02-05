@@ -105,6 +105,24 @@ export async function fetchTradesFromSheet(): Promise<Trade[]> {
   return trades;
 }
 
+// Fetch the live spot rate from Google Finance formula in cell J1
+export async function fetchSpotFromSheet(): Promise<number | null> {
+  const sheetId = process.env.SHEET_ID;
+  if (!sheetId) return null;
+
+  try {
+    const rows = await readSheetValues(sheetId, "USD-INR!J1");
+    if (rows.length > 0 && rows[0].length > 0) {
+      const raw = String(rows[0][0]).replace(/[^0-9.]/g, "");
+      const rate = parseFloat(raw);
+      if (rate > 50 && rate < 200) return rate;
+    }
+  } catch {
+    // Sheet unavailable — caller should fall back
+  }
+  return null;
+}
+
 // Demo trades matching your actual sheet structure
 export function getDemoTrades(): Trade[] {
   return [
