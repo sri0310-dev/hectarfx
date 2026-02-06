@@ -30,10 +30,41 @@ type ActiveHedge = {
 
 type SimHedge = {
   id: number;
-  amountInr: string;
+  mode: "USD" | "INR"; // NEW: choose input mode
+  amount: string;      // Input amount (either USD or INR based on mode)
   rate: string;
   expiry: string;
 };
+
+// Smart number parser: "2cr" → 20000000, "2l" → 200000, "80k" → 80000
+function parseSmartNumber(input: string): number {
+  const s = input.trim().toLowerCase();
+  if (!s) return 0;
+
+  // Match number followed by optional suffix
+  const match = s.match(/^([\d.,]+)\s*(cr|crore|l|lakh|lakhs|k|m|million)?$/i);
+  if (!match) return parseFloat(s.replace(/,/g, "")) || 0;
+
+  const num = parseFloat(match[1].replace(/,/g, "")) || 0;
+  const suffix = (match[2] || "").toLowerCase();
+
+  switch (suffix) {
+    case "cr":
+    case "crore":
+      return num * 10000000; // 1 crore = 10 million
+    case "l":
+    case "lakh":
+    case "lakhs":
+      return num * 100000;
+    case "k":
+      return num * 1000;
+    case "m":
+    case "million":
+      return num * 1000000;
+    default:
+      return num;
+  }
+}
 
 function formatINR(n: number): string {
   const abs = Math.abs(n);
@@ -105,13 +136,34 @@ export default function SimulatorPage() {
 
   // Sim hedge management
   function addSimHedge() {
-    setSimHedges((prev) => [...prev, { id: simIdCounter++, amountInr: "0", rate: "0", expiry: "" }]);
+    setSimHedges((prev) => [...prev, { id: simIdCounter++, mode: "INR", amount: "", rate: "", expiry: "" }]);
   }
   function removeSimHedge(id: number) {
     setSimHedges((prev) => prev.filter((h) => h.id !== id));
   }
   function updateSimHedge(id: number, field: keyof Omit<SimHedge, "id">, value: string) {
     setSimHedges((prev) => prev.map((h) => (h.id === id ? { ...h, [field]: value } : h)));
+  }
+  function toggleSimHedgeMode(id: number) {
+    setSimHedges((prev) => prev.map((h) => (h.id === id ? { ...h, mode: h.mode === "USD" ? "INR" : "USD", amount: "" } : h)));
+  }
+  // Calculate INR amount from sim hedge (handles both USD and INR modes)
+  function getSimHedgeInr(h: SimHedge): number {
+    const amt = parseSmartNumber(h.amount);
+    const rate = parseFloat(h.rate) || 0;
+    if (h.mode === "USD") {
+      return amt * rate; // USD * rate = INR
+    }
+    return amt; // Already INR
+  }
+  // Calculate USD amount from sim hedge
+  function getSimHedgeUsd(h: SimHedge): number {
+    const amt = parseSmartNumber(h.amount);
+    const rate = parseFloat(h.rate) || 0;
+    if (h.mode === "USD") {
+      return amt; // Already USD
+    }
+    return rate > 0 ? amt / rate : 0; // INR / rate = USD
   }
 
   // Trade selection
@@ -164,9 +216,9 @@ export default function SimulatorPage() {
       if (h.status === "ACTIVE") allHedges.push({ amountInr: h.inrAmount, rate: h.rate, expiry: h.settlementDate });
     });
     simHedges.forEach((h) => {
-      const amt = Math.max(Number(h.amountInr) || 0, 0);
-      const rate = Number(h.rate) || 0;
-      if (amt > 0 && rate > 0) allHedges.push({ amountInr: amt, rate, expiry: h.expiry || "" });
+      const inrAmt = getSimHedgeInr(h);
+      const rate = parseFloat(h.rate) || 0;
+      if (inrAmt > 0 && rate > 0) allHedges.push({ amountInr: inrAmt, rate, expiry: h.expiry || "" });
     });
 
     // Per-trade allocation
@@ -247,15 +299,15 @@ export default function SimulatorPage() {
   }, [scopeTrades, activeHedges, simHedges, effectiveSpot, selectionApplied, selectedIds.size]);
 
   if (loading) {
-    return <div className="flex items-center justify-center h-96"><div className="text-slate-400">Loading simulator...</div></div>;
+    return <div className="flex items-center justify-center h-96"><div style={{ color: "var(--text-secondary)" }}>Loading simulator...</div></div>;
   }
   if (!analysis) return null;
 
   return (
     <div className="max-w-[1400px]">
-      <div className="mb-4">
-        <h1 className="text-xl md:text-2xl font-bold text-white">Simulator</h1>
-        <p className="text-xs md:text-sm text-slate-400 mt-1">
+      <div className="mb-5">
+        <h1 className="text-2xl md:text-3xl font-bold" style={{ color: "var(--text-primary)" }}>Simulator</h1>
+        <p className="text-sm md:text-base mt-1" style={{ color: "var(--text-secondary)" }}>
           {trades.length} trades &middot; {formatUSD(analysis.totalUsdExposure)} exposure
           &middot; {activeHedges.length} active hedge{activeHedges.length !== 1 ? "s" : ""}
         </p>
@@ -266,24 +318,24 @@ export default function SimulatorPage() {
         <div className="lg:col-span-4 space-y-3">
 
           {/* Current Position */}
-          <div className="card py-3 px-4">
-            <h3 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Current Position</h3>
-            <div className="space-y-1.5">
+          <div className="card py-4 px-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-muted)" }}>Current Position</h3>
+            <div className="space-y-2.5">
               <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-400">Mark-to-Book</span>
-                <span className="font-mono text-sm font-bold text-amber-400">{analysis.blendedMtb.toFixed(4)}</span>
+                <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Mark-to-Book</span>
+                <span className="font-mono text-lg font-bold" style={{ color: "var(--accent-amber)" }}>{analysis.blendedMtb.toFixed(4)}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-400">Live Spot</span>
+                <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Live Spot</span>
                 <div className="text-right">
-                  <span className="font-mono text-sm font-bold text-cyan-400">{liveSpot.toFixed(4)}</span>
-                  {fxSource && <span className="text-[9px] text-slate-600 ml-1">({fxSource})</span>}
+                  <span className="font-mono text-lg font-bold" style={{ color: "var(--accent-cyan)" }}>{liveSpot.toFixed(4)}</span>
+                  {fxSource && <span className="text-xs ml-2" style={{ color: "var(--text-muted)" }}>({fxSource})</span>}
                 </div>
               </div>
-              <div className="border-t border-[#2a3650]/50 pt-1.5">
+              <div className="pt-2" style={{ borderTop: "1px solid var(--border)" }}>
                 <div className="flex justify-between items-center">
-                  <span className="text-xs text-slate-400">vs Book P&L</span>
-                  <span className={`font-mono text-sm font-bold ${analysis.totalPnlVsBook >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>vs Book P&L</span>
+                  <span className="font-mono text-lg font-bold" style={{ color: analysis.totalPnlVsBook >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
                     {analysis.totalPnlVsBook >= 0 ? "+" : ""}{formatUSD(analysis.totalPnlVsBook)}
                   </span>
                 </div>
@@ -292,12 +344,12 @@ export default function SimulatorPage() {
           </div>
 
           {/* Scenario Spot */}
-          <div className="card py-3 px-4">
-            <h3 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Scenario USDINR</h3>
+          <div className="card py-4 px-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-muted)" }}>Scenario USDINR</h3>
             <input
               type="number"
               step="0.01"
-              className="input-field text-center text-xl font-bold w-full mb-2"
+              className="input-field text-center text-2xl font-bold w-full mb-3"
               value={scenarioSpot}
               onChange={(e) => setScenarioSpot(e.target.value)}
             />
@@ -310,16 +362,17 @@ export default function SimulatorPage() {
               onChange={(e) => setScenarioSpot(e.target.value)}
               className="w-full accent-blue-500"
             />
-            <div className="flex gap-1.5 mt-2">
+            <div className="flex gap-2 mt-3">
               {[-2, -1, 0, +1, +2].map((delta) => (
                 <button
                   key={delta}
                   onClick={() => setScenarioSpot((liveSpot + delta).toFixed(4))}
-                  className={`flex-1 text-[10px] py-1 rounded border transition-all ${
-                    Math.abs(Number(scenarioSpot) - (liveSpot + delta)) < 0.01
-                      ? "border-blue-500 bg-blue-500/10 text-blue-400"
-                      : "border-[#2a3650] text-slate-500 hover:text-slate-300"
-                  }`}
+                  className="flex-1 text-sm py-1.5 rounded font-medium transition-all"
+                  style={{
+                    border: `1px solid ${Math.abs(Number(scenarioSpot) - (liveSpot + delta)) < 0.01 ? "var(--accent-blue)" : "var(--border)"}`,
+                    background: Math.abs(Number(scenarioSpot) - (liveSpot + delta)) < 0.01 ? "var(--accent-blue)" : "transparent",
+                    color: Math.abs(Number(scenarioSpot) - (liveSpot + delta)) < 0.01 ? "white" : "var(--text-secondary)",
+                  }}
                 >
                   {delta === 0 ? "Spot" : delta > 0 ? `+${delta}` : `${delta}`}
                 </button>
@@ -328,62 +381,132 @@ export default function SimulatorPage() {
           </div>
 
           {/* Active Hedges */}
-          <div className="card py-3 px-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+          <div className="card py-4 px-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
                 Active Hedges ({activeHedges.length})
               </h3>
-              <Link href="/hedges" className="text-[10px] text-blue-400 hover:text-blue-300">Manage &rarr;</Link>
+              <Link href="/hedges" className="text-sm font-medium" style={{ color: "var(--accent-blue)" }}>Manage &rarr;</Link>
             </div>
             {activeHedges.length > 0 ? (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {activeHedges.map((h) => (
-                  <div key={h.id} className="flex items-center justify-between text-xs py-1 border-b border-[#2a3650]/30 last:border-0">
+                  <div key={h.id} className="flex items-center justify-between text-sm py-2" style={{ borderBottom: "1px solid var(--border)" }}>
                     <div>
-                      <span className="font-mono text-cyan-400">{formatUSD(h.usdAmount)}</span>
-                      <span className="text-slate-500 mx-1">@</span>
-                      <span className="font-mono text-amber-400">{h.rate.toFixed(4)}</span>
+                      <span className="font-mono font-medium" style={{ color: "var(--accent-cyan)" }}>{formatUSD(h.usdAmount)}</span>
+                      <span className="mx-2" style={{ color: "var(--text-muted)" }}>@</span>
+                      <span className="font-mono font-medium" style={{ color: "var(--accent-amber)" }}>{h.rate.toFixed(4)}</span>
                     </div>
-                    <span className="font-mono text-slate-500 text-[10px]">{h.settlementDate}</span>
+                    <span className="font-mono text-sm" style={{ color: "var(--text-muted)" }}>{h.settlementDate}</span>
                   </div>
                 ))}
-                <div className="text-[10px] text-slate-600 pt-1">
-                  Total: {formatINR(activeHedges.reduce((s, h) => s + h.inrAmount, 0))} @ {analysis.weightedAvgHedgeRate.toFixed(4)} avg
+                <div className="text-sm pt-2" style={{ color: "var(--text-secondary)" }}>
+                  Total: <strong style={{ color: "var(--accent-amber)" }}>{formatINR(activeHedges.reduce((s, h) => s + h.inrAmount, 0))}</strong> @ <strong>{analysis.weightedAvgHedgeRate.toFixed(4)}</strong> avg
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-slate-600">No active hedges. <Link href="/hedges" className="text-blue-400">Add one</Link></p>
+              <p className="text-sm py-2" style={{ color: "var(--text-muted)" }}>No active hedges. <Link href="/hedges" style={{ color: "var(--accent-blue)" }}>Add one</Link></p>
             )}
           </div>
 
           {/* Simulation Hedges */}
           <div className="card py-3 px-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Simulation Hedges</h3>
-              <button onClick={addSimHedge} className="text-[10px] text-blue-400 hover:text-blue-300 border border-blue-500/30 rounded px-1.5 py-0.5">+ Add</button>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Simulation Hedges</h3>
+              <button onClick={addSimHedge} className="text-xs text-blue-400 hover:text-blue-300 border border-blue-500/30 rounded px-2 py-1 font-medium">+ Add Hedge</button>
             </div>
             {simHedges.length > 0 ? (
-              <>
-                <div className="grid grid-cols-[1fr_1fr_1fr_20px] gap-1.5 mb-1.5">
-                  <span className="text-[9px] text-slate-600 uppercase">INR Amt</span>
-                  <span className="text-[9px] text-slate-600 uppercase">Rate</span>
-                  <span className="text-[9px] text-slate-600 uppercase">Expiry</span>
-                  <span />
-                </div>
-                {simHedges.map((h) => (
-                  <div key={h.id} className="grid grid-cols-[1fr_1fr_1fr_20px] gap-1.5 mb-1.5">
-                    <input type="number" className="input-field text-[10px] py-1" value={h.amountInr} onChange={(e) => updateSimHedge(h.id, "amountInr", e.target.value)} />
-                    <input type="number" step="0.01" className="input-field text-[10px] py-1" value={h.rate} onChange={(e) => updateSimHedge(h.id, "rate", e.target.value)} />
-                    <input type="date" className="input-field text-[10px] py-1" value={h.expiry} onChange={(e) => updateSimHedge(h.id, "expiry", e.target.value)} />
-                    <button onClick={() => removeSimHedge(h.id)} className="text-slate-600 hover:text-red-400 text-[10px]">✕</button>
-                  </div>
-                ))}
-              </>
+              <div className="space-y-3">
+                {simHedges.map((h) => {
+                  const inrVal = getSimHedgeInr(h);
+                  const usdVal = getSimHedgeUsd(h);
+                  const rate = parseFloat(h.rate) || 0;
+                  return (
+                    <div key={h.id} className="p-3 rounded-lg" style={{ background: "var(--bg-card-hover)", border: "1px solid var(--border)" }}>
+                      <div className="flex items-center justify-between mb-2">
+                        {/* USD/INR Toggle */}
+                        <div className="flex rounded overflow-hidden" style={{ border: "1px solid var(--border)" }}>
+                          <button
+                            onClick={() => h.mode !== "USD" && toggleSimHedgeMode(h.id)}
+                            className="px-3 py-1 text-xs font-medium transition-colors"
+                            style={{
+                              background: h.mode === "USD" ? "var(--accent-blue)" : "transparent",
+                              color: h.mode === "USD" ? "white" : "var(--text-muted)",
+                            }}
+                          >
+                            USD
+                          </button>
+                          <button
+                            onClick={() => h.mode !== "INR" && toggleSimHedgeMode(h.id)}
+                            className="px-3 py-1 text-xs font-medium transition-colors"
+                            style={{
+                              background: h.mode === "INR" ? "var(--accent-blue)" : "transparent",
+                              color: h.mode === "INR" ? "white" : "var(--text-muted)",
+                            }}
+                          >
+                            INR
+                          </button>
+                        </div>
+                        <button onClick={() => removeSimHedge(h.id)} className="text-xs px-2 py-1 rounded hover:bg-red-500/20" style={{ color: "var(--accent-red)" }}>Remove</button>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="text-xs mb-1 block" style={{ color: "var(--text-muted)" }}>
+                            {h.mode === "USD" ? "USD Amount" : "INR Amount"}
+                          </label>
+                          <input
+                            type="text"
+                            className="input-field text-sm py-2 font-mono"
+                            placeholder={h.mode === "USD" ? "80k or 80000" : "2cr or 2l"}
+                            value={h.amount}
+                            onChange={(e) => updateSimHedge(h.id, "amount", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs mb-1 block" style={{ color: "var(--text-muted)" }}>Rate</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            className="input-field text-sm py-2 font-mono"
+                            placeholder="90.50"
+                            value={h.rate}
+                            onChange={(e) => updateSimHedge(h.id, "rate", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs mb-1 block" style={{ color: "var(--text-muted)" }}>Expiry</label>
+                          <input
+                            type="date"
+                            className="input-field text-sm py-2"
+                            value={h.expiry}
+                            onChange={(e) => updateSimHedge(h.id, "expiry", e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Computed values */}
+                      {rate > 0 && parseSmartNumber(h.amount) > 0 && (
+                        <div className="mt-2 pt-2 flex gap-4 text-xs" style={{ borderTop: "1px solid var(--border)" }}>
+                          <span style={{ color: "var(--text-muted)" }}>
+                            {h.mode === "USD" ? "INR locked:" : "USD equivalent:"}
+                          </span>
+                          <span className="font-mono font-medium" style={{ color: h.mode === "USD" ? "var(--accent-amber)" : "var(--accent-cyan)" }}>
+                            {h.mode === "USD" ? formatINR(inrVal) : formatUSD(usdVal)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
-              <p className="text-[10px] text-slate-600 italic">None. Click &quot;+ Add&quot; for what-if hedges.</p>
+              <p className="text-sm py-4 text-center" style={{ color: "var(--text-muted)" }}>
+                No simulation hedges. Click <strong>&quot;+ Add Hedge&quot;</strong> for what-if analysis.
+              </p>
             )}
-            <p className="text-[9px] text-slate-600 mt-2">
-              Hedges allocated <strong className="text-slate-400">top-to-bottom</strong>, <strong className="text-slate-400">earliest receipts first</strong>.
+            <p className="text-xs mt-3" style={{ color: "var(--text-muted)" }}>
+              <strong>Tip:</strong> Use shortcuts like <code className="px-1 py-0.5 rounded" style={{ background: "var(--bg-card)" }}>2cr</code>, <code className="px-1 py-0.5 rounded" style={{ background: "var(--bg-card)" }}>50l</code>, <code className="px-1 py-0.5 rounded" style={{ background: "var(--bg-card)" }}>80k</code> for amounts.
             </p>
           </div>
         </div>
@@ -392,63 +515,63 @@ export default function SimulatorPage() {
         <div className="lg:col-span-8 space-y-3">
 
           {/* Compact Results */}
-          <div className="card py-3 px-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xs font-semibold text-slate-300">Results</h3>
-              <span className="text-[10px] font-mono text-slate-500 border border-[#2a3650] rounded px-2 py-0.5">
+          <div className="card py-4 px-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Results</h3>
+              <span className="text-sm font-mono rounded px-3 py-1" style={{ color: "var(--text-secondary)", background: "var(--bg-card-hover)", border: "1px solid var(--border)" }}>
                 {analysis.scopeLabel}
               </span>
             </div>
-            <div className="grid grid-cols-3 md:grid-cols-7 gap-2 md:gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
               <div>
-                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">INR Receivables</div>
-                <div className="text-xs md:text-sm font-bold text-amber-400 font-mono">{formatINR(analysis.totalInr)}</div>
+                <div className="text-xs uppercase mb-1" style={{ color: "var(--text-muted)" }}>INR Receivables</div>
+                <div className="text-base md:text-lg font-bold font-mono" style={{ color: "var(--accent-amber)" }}>{formatINR(analysis.totalInr)}</div>
               </div>
               <div>
-                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">INR Hedged</div>
-                <div className="text-xs md:text-sm font-bold text-cyan-400 font-mono">{formatINR(analysis.totalHedgedInr)}</div>
+                <div className="text-xs uppercase mb-1" style={{ color: "var(--text-muted)" }}>INR Hedged</div>
+                <div className="text-base md:text-lg font-bold font-mono" style={{ color: "var(--accent-cyan)" }}>{formatINR(analysis.totalHedgedInr)}</div>
                 {analysis.weightedAvgHedgeRate > 0 && (
-                  <div className="text-[8px] text-slate-600 font-mono">@ {analysis.weightedAvgHedgeRate.toFixed(2)}</div>
+                  <div className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>@ {analysis.weightedAvgHedgeRate.toFixed(2)}</div>
                 )}
               </div>
               <div>
-                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">USD at Book</div>
-                <div className="text-xs md:text-sm font-bold text-slate-300 font-mono">{formatUSD(analysis.totalUsdAtBook)}</div>
+                <div className="text-xs uppercase mb-1" style={{ color: "var(--text-muted)" }}>USD at Book</div>
+                <div className="text-base md:text-lg font-bold font-mono" style={{ color: "var(--text-secondary)" }}>{formatUSD(analysis.totalUsdAtBook)}</div>
               </div>
               <div>
-                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">USD at Scenario</div>
-                <div className="text-xs md:text-sm font-bold text-slate-200 font-mono">{formatUSD(analysis.totalUsdWithHedge)}</div>
+                <div className="text-xs uppercase mb-1" style={{ color: "var(--text-muted)" }}>USD at Scenario</div>
+                <div className="text-base md:text-lg font-bold font-mono" style={{ color: "var(--text-primary)" }}>{formatUSD(analysis.totalUsdWithHedge)}</div>
               </div>
               <div>
-                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">vs Book P&L</div>
-                <div className={`text-xs md:text-sm font-bold font-mono ${analysis.totalPnlVsBook >= 0 ? "text-green-400" : "text-red-400"}`}>
+                <div className="text-xs uppercase mb-1" style={{ color: "var(--text-muted)" }}>vs Book P&L</div>
+                <div className="text-base md:text-lg font-bold font-mono" style={{ color: analysis.totalPnlVsBook >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
                   {analysis.totalPnlVsBook >= 0 ? "+" : ""}{formatUSD(analysis.totalPnlVsBook)}
                 </div>
               </div>
               <div>
-                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">Hedge Benefit</div>
-                <div className={`text-xs md:text-sm font-bold font-mono ${analysis.totalHedgeBenefit >= 0 ? "text-green-400" : "text-red-400"}`}>
+                <div className="text-xs uppercase mb-1" style={{ color: "var(--text-muted)" }}>Hedge Benefit</div>
+                <div className="text-base md:text-lg font-bold font-mono" style={{ color: analysis.totalHedgeBenefit >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
                   {analysis.totalHedgeBenefit >= 0 ? "+" : ""}{formatUSD(analysis.totalHedgeBenefit)}
                 </div>
               </div>
               <div>
-                <div className="text-[8px] md:text-[9px] text-slate-500 uppercase">Eff. Rate</div>
-                <div className="text-xs md:text-sm font-bold text-cyan-400 font-mono">{analysis.effectiveAvgRate.toFixed(4)}</div>
+                <div className="text-xs uppercase mb-1" style={{ color: "var(--text-muted)" }}>Eff. Rate</div>
+                <div className="text-base md:text-lg font-bold font-mono" style={{ color: "var(--accent-cyan)" }}>{analysis.effectiveAvgRate.toFixed(4)}</div>
               </div>
             </div>
           </div>
 
           {/* Trade-Level View */}
           <div className="card p-0 overflow-hidden">
-            <div className="px-3 md:px-4 py-3 border-b border-[#2a3650]">
-              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Trade-Level View</div>
+            <div className="px-4 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
+              <div className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-primary)" }}>Trade-Level View</div>
 
               {/* Filter controls - stacks on mobile */}
-              <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] md:text-xs text-slate-400">Select by</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Select by</span>
                   <select
-                    className="input-field text-[10px] md:text-xs py-1 px-1.5 md:px-2 w-auto"
+                    className="select-field text-sm py-2 px-3 w-auto"
                     value={selectBy}
                     onChange={(e) => setSelectBy(e.target.value as "manual" | "month" | "commodity")}
                   >
@@ -459,99 +582,104 @@ export default function SimulatorPage() {
                 </div>
 
                 {selectBy === "month" && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] md:text-xs text-slate-400">Month</span>
-                    <select className="input-field text-[10px] md:text-xs py-1 px-1.5 w-auto" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Month</span>
+                    <select className="select-field text-sm py-2 px-3 w-auto" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
                       <option value="">All</option>
                       {availableMonths.map((m) => {
                         const d = new Date(m + "-01");
                         return <option key={m} value={m}>{d.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</option>;
                       })}
                     </select>
-                    <button onClick={applyFilter} className="text-[10px] px-2 py-1 rounded border border-blue-500 text-blue-400">Apply</button>
+                    <button onClick={applyFilter} className="text-sm px-3 py-2 rounded font-medium" style={{ border: "1px solid var(--accent-blue)", color: "var(--accent-blue)" }}>Apply</button>
                   </div>
                 )}
 
                 {selectBy === "commodity" && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] md:text-xs text-slate-400">Commodity</span>
-                    <select className="input-field text-[10px] md:text-xs py-1 px-1.5 w-auto" value={filterCommodity} onChange={(e) => setFilterCommodity(e.target.value)}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm" style={{ color: "var(--text-secondary)" }}>Commodity</span>
+                    <select className="select-field text-sm py-2 px-3 w-auto" value={filterCommodity} onChange={(e) => setFilterCommodity(e.target.value)}>
                       <option value="">All</option>
                       {availableCommodities.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
-                    <button onClick={applyFilter} className="text-[10px] px-2 py-1 rounded border border-blue-500 text-blue-400">Apply</button>
+                    <button onClick={applyFilter} className="text-sm px-3 py-2 rounded font-medium" style={{ border: "1px solid var(--accent-blue)", color: "var(--accent-blue)" }}>Apply</button>
                   </div>
                 )}
 
-                <div className="flex items-center gap-1.5 ml-auto">
-                  <span className="text-[10px] font-mono text-slate-500 border border-[#2a3650] rounded px-1.5 py-0.5">
+                <div className="flex items-center gap-2 ml-auto">
+                  <span className="text-sm font-mono rounded px-2 py-1" style={{ color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
                     Selected: {selectedIds.size}
                   </span>
                   <button onClick={applySelection} disabled={selectedIds.size === 0}
-                    className={`text-[10px] px-2 py-1 rounded border ${selectedIds.size > 0 ? "border-blue-500 text-blue-400" : "border-[#2a3650] text-slate-600 cursor-not-allowed"}`}>Apply</button>
-                  <button onClick={clearSelection} className="text-[10px] px-2 py-1 rounded border border-[#2a3650] text-slate-500 hover:text-slate-300">Clear</button>
-                  <button onClick={selectAll} className="text-[10px] px-2 py-1 rounded border border-[#2a3650] text-slate-500 hover:text-slate-300">Select all</button>
+                    className="text-sm px-3 py-1.5 rounded font-medium"
+                    style={{
+                      border: `1px solid ${selectedIds.size > 0 ? "var(--accent-blue)" : "var(--border)"}`,
+                      color: selectedIds.size > 0 ? "var(--accent-blue)" : "var(--text-muted)",
+                      cursor: selectedIds.size > 0 ? "pointer" : "not-allowed",
+                    }}>Apply</button>
+                  <button onClick={clearSelection} className="text-sm px-3 py-1.5 rounded" style={{ border: "1px solid var(--border)", color: "var(--text-secondary)" }}>Clear</button>
+                  <button onClick={selectAll} className="text-sm px-3 py-1.5 rounded" style={{ border: "1px solid var(--border)", color: "var(--text-secondary)" }}>Select all</button>
                 </div>
               </div>
 
-              <p className="text-[8px] md:text-[9px] text-slate-600 mt-1.5">
-                If nothing selected, scope = <strong className="text-slate-400">All trades</strong>. North Star: beat the mark-to-book rate.
+              <p className="text-sm mt-3" style={{ color: "var(--text-muted)" }}>
+                If nothing selected, scope = <strong style={{ color: "var(--text-primary)" }}>All trades</strong>. North Star: beat the mark-to-book rate.
               </p>
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[700px]">
+              <table className="w-full min-w-[800px]">
                 <thead>
-                  <tr className="border-b border-[#2a3650]">
-                    <th className="table-header w-8 px-2 md:px-4"></th>
-                    <th className="table-header px-2 md:px-4">Commodity</th>
-                    <th className="table-header px-2 md:px-4">Receipt Date</th>
-                    <th className="table-header text-right px-2 md:px-4">INR Receivable</th>
-                    <th className="table-header text-right px-2 md:px-4">Hedged INR</th>
-                    <th className="table-header text-right px-2 md:px-4">USD at Book</th>
-                    <th className="table-header text-right px-2 md:px-4">USD at Scenario</th>
-                    <th className="table-header text-right px-2 md:px-4">vs Book</th>
-                    <th className="table-header text-right px-2 md:px-4">Hedge +/-</th>
+                  <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                    <th className="py-3 px-4 text-left text-sm font-semibold" style={{ color: "var(--text-muted)" }}></th>
+                    <th className="py-3 px-4 text-left text-sm font-semibold" style={{ color: "var(--text-muted)" }}>Commodity</th>
+                    <th className="py-3 px-4 text-left text-sm font-semibold" style={{ color: "var(--text-muted)" }}>Receipt Date</th>
+                    <th className="py-3 px-4 text-right text-sm font-semibold" style={{ color: "var(--text-muted)" }}>INR Receivable</th>
+                    <th className="py-3 px-4 text-right text-sm font-semibold" style={{ color: "var(--text-muted)" }}>Hedged INR</th>
+                    <th className="py-3 px-4 text-right text-sm font-semibold" style={{ color: "var(--text-muted)" }}>USD at Book</th>
+                    <th className="py-3 px-4 text-right text-sm font-semibold" style={{ color: "var(--text-muted)" }}>USD at Scenario</th>
+                    <th className="py-3 px-4 text-right text-sm font-semibold" style={{ color: "var(--text-muted)" }}>vs Book</th>
+                    <th className="py-3 px-4 text-right text-sm font-semibold" style={{ color: "var(--text-muted)" }}>Hedge +/-</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#2a3650]/50">
+                <tbody>
                   {analysis.tradeResults.map((t) => (
-                    <tr key={t.tradeId} className={`hover:bg-[#1e2a3f] transition-colors ${selectedIds.has(t.tradeId) ? "bg-blue-500/5" : ""}`}>
-                      <td className="table-cell px-2 md:px-4">
-                        <input type="checkbox" checked={selectedIds.has(t.tradeId)} onChange={() => toggleTrade(t.tradeId)} className="accent-blue-500 w-3 h-3" />
+                    <tr key={t.tradeId} className="transition-colors" style={{ borderBottom: "1px solid var(--border)", background: selectedIds.has(t.tradeId) ? "rgba(59, 130, 246, 0.05)" : "transparent" }}>
+                      <td className="py-3 px-4">
+                        <input type="checkbox" checked={selectedIds.has(t.tradeId)} onChange={() => toggleTrade(t.tradeId)} className="accent-blue-500 w-4 h-4" />
                       </td>
-                      <td className="table-cell text-slate-200 text-xs px-2 md:px-4">{t.baseCommodity}</td>
-                      <td className="table-cell font-mono text-slate-400 text-xs px-2 md:px-4">{t.inrSaleDate}</td>
-                      <td className="table-cell font-mono text-amber-400 text-xs text-right px-2 md:px-4">{formatINR(t.inrSale)}</td>
-                      <td className="table-cell font-mono text-xs text-right px-2 md:px-4">
-                        <span className={t.hedgedInr > 0 ? "text-green-400" : "text-slate-600"}>{formatINR(t.hedgedInr)}</span>
+                      <td className="py-3 px-4 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{t.baseCommodity}</td>
+                      <td className="py-3 px-4 font-mono text-sm" style={{ color: "var(--text-secondary)" }}>{t.inrSaleDate}</td>
+                      <td className="py-3 px-4 font-mono text-sm text-right font-medium" style={{ color: "var(--accent-amber)" }}>{formatINR(t.inrSale)}</td>
+                      <td className="py-3 px-4 font-mono text-sm text-right">
+                        <span style={{ color: t.hedgedInr > 0 ? "var(--accent-green)" : "var(--text-muted)" }}>{formatINR(t.hedgedInr)}</span>
                       </td>
-                      <td className="table-cell font-mono text-slate-400 text-xs text-right px-2 md:px-4">{formatUSD(t.usdAtBook)}</td>
-                      <td className="table-cell font-mono text-slate-200 text-xs text-right px-2 md:px-4">{formatUSD(t.usdWithHedge)}</td>
-                      <td className={`table-cell font-mono text-xs text-right font-semibold px-2 md:px-4 ${t.pnlVsBook > 0.5 ? "text-green-400" : t.pnlVsBook < -0.5 ? "text-red-400" : "text-slate-600"}`}>
+                      <td className="py-3 px-4 font-mono text-sm text-right" style={{ color: "var(--text-secondary)" }}>{formatUSD(t.usdAtBook)}</td>
+                      <td className="py-3 px-4 font-mono text-sm text-right font-medium" style={{ color: "var(--text-primary)" }}>{formatUSD(t.usdWithHedge)}</td>
+                      <td className="py-3 px-4 font-mono text-sm text-right font-bold" style={{ color: t.pnlVsBook > 0.5 ? "var(--accent-green)" : t.pnlVsBook < -0.5 ? "var(--accent-red)" : "var(--text-muted)" }}>
                         {t.pnlVsBook > 0.5 ? "+" : ""}{Math.abs(t.pnlVsBook) < 0.5 ? "$0" : formatUSD(t.pnlVsBook)}
                       </td>
-                      <td className={`table-cell font-mono text-xs text-right px-2 md:px-4 ${t.hedgeBenefit > 0.5 ? "text-green-400" : t.hedgeBenefit < -0.5 ? "text-red-400" : "text-slate-600"}`}>
+                      <td className="py-3 px-4 font-mono text-sm text-right" style={{ color: t.hedgeBenefit > 0.5 ? "var(--accent-green)" : t.hedgeBenefit < -0.5 ? "var(--accent-red)" : "var(--text-muted)" }}>
                         {t.hedgeBenefit > 0.5 ? "+" : ""}{Math.abs(t.hedgeBenefit) < 0.5 ? "$0" : formatUSD(t.hedgeBenefit)}
                       </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr className="border-t-2 border-[#2a3650] bg-[#111827]">
-                    <td className="table-cell px-2 md:px-4" colSpan={3}>
-                      <span className="text-xs font-semibold text-slate-400">Total ({analysis.tradeResults.length})</span>
+                  <tr style={{ borderTop: "2px solid var(--border)", background: "var(--bg-secondary)" }}>
+                    <td className="py-3 px-4" colSpan={3}>
+                      <span className="text-sm font-bold" style={{ color: "var(--text-secondary)" }}>Total ({analysis.tradeResults.length})</span>
                     </td>
-                    <td className="table-cell font-mono text-amber-400 text-xs text-right font-bold px-2 md:px-4">{formatINR(analysis.totalInr)}</td>
-                    <td className="table-cell font-mono text-xs text-right font-bold px-2 md:px-4">
-                      <span className={analysis.totalHedgedInr > 0 ? "text-green-400" : "text-slate-600"}>{formatINR(analysis.totalHedgedInr)}</span>
+                    <td className="py-3 px-4 font-mono text-sm text-right font-bold" style={{ color: "var(--accent-amber)" }}>{formatINR(analysis.totalInr)}</td>
+                    <td className="py-3 px-4 font-mono text-sm text-right font-bold">
+                      <span style={{ color: analysis.totalHedgedInr > 0 ? "var(--accent-green)" : "var(--text-muted)" }}>{formatINR(analysis.totalHedgedInr)}</span>
                     </td>
-                    <td className="table-cell font-mono text-slate-400 text-xs text-right font-bold px-2 md:px-4">{formatUSD(analysis.totalUsdAtBook)}</td>
-                    <td className="table-cell font-mono text-slate-200 text-xs text-right font-bold px-2 md:px-4">{formatUSD(analysis.totalUsdWithHedge)}</td>
-                    <td className={`table-cell font-mono text-xs text-right font-bold px-2 md:px-4 ${analysis.totalPnlVsBook >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    <td className="py-3 px-4 font-mono text-sm text-right font-bold" style={{ color: "var(--text-secondary)" }}>{formatUSD(analysis.totalUsdAtBook)}</td>
+                    <td className="py-3 px-4 font-mono text-sm text-right font-bold" style={{ color: "var(--text-primary)" }}>{formatUSD(analysis.totalUsdWithHedge)}</td>
+                    <td className="py-3 px-4 font-mono text-sm text-right font-bold" style={{ color: analysis.totalPnlVsBook >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
                       {analysis.totalPnlVsBook >= 0 ? "+" : ""}{formatUSD(analysis.totalPnlVsBook)}
                     </td>
-                    <td className={`table-cell font-mono text-xs text-right font-bold px-2 md:px-4 ${analysis.totalHedgeBenefit >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    <td className="py-3 px-4 font-mono text-sm text-right font-bold" style={{ color: analysis.totalHedgeBenefit >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
                       {analysis.totalHedgeBenefit >= 0 ? "+" : ""}{formatUSD(analysis.totalHedgeBenefit)}
                     </td>
                   </tr>
@@ -559,9 +687,9 @@ export default function SimulatorPage() {
               </table>
             </div>
 
-            <div className="px-3 md:px-4 py-2 border-t border-[#2a3650]/50 text-[8px] md:text-[9px] text-slate-600">
-              <span className="font-semibold text-slate-500">vs Book</span> = USD at scenario (w/ hedges) &minus; USD at book rate. Positive = beating the trader&apos;s booked rate.{" "}
-              <span className="font-semibold text-slate-500">Hedge +/-</span> = benefit of hedges vs unhedged at scenario.
+            <div className="px-4 py-3 text-sm" style={{ borderTop: "1px solid var(--border)", color: "var(--text-muted)" }}>
+              <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>vs Book</span> = USD at scenario (w/ hedges) − USD at book rate. Positive = beating the trader&apos;s booked rate.{" "}
+              <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>Hedge +/-</span> = benefit of hedges vs unhedged at scenario.
             </div>
           </div>
         </div>
