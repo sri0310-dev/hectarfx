@@ -106,7 +106,7 @@ export default function DashboardPage() {
   if (loading || !fx) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="text-slate-400">Loading dashboard...</div>
+        <div style={{ color: "var(--text-secondary)" }}>Loading dashboard...</div>
       </div>
     );
   }
@@ -184,25 +184,25 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-          <p className="text-sm text-slate-400 mt-1">
+          <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>Dashboard</h1>
+          <p className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
             Position overview &middot; {trades.length} open trades
           </p>
         </div>
         <div className="text-right">
           <div className="flex items-center gap-2 justify-end">
-            <div className="text-sm text-slate-400">USDINR Spot</div>
+            <div className="text-sm" style={{ color: "var(--text-secondary)" }}>USDINR Spot</div>
             {fxSource && (
-              <span className="text-[10px] text-slate-600 px-1.5 py-0.5 rounded bg-[#1e2a3f]">
+              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "var(--bg-card)", color: "var(--text-muted)", border: "1px solid var(--border)" }}>
                 {fxSource}
               </span>
             )}
           </div>
-          <div className="text-2xl font-bold text-cyan-400">
+          <div className="text-2xl font-bold" style={{ color: "var(--accent-cyan)" }}>
             {spot.toFixed(4)}
           </div>
           {fx.updatedAt && (
-            <div className="text-[10px] text-slate-600">
+            <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
               Updated {new Date(fx.updatedAt).toLocaleTimeString()}
             </div>
           )}
@@ -212,21 +212,21 @@ export default function DashboardPage() {
       {/* FX Rate Sources */}
       <div className="card py-3 px-4">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Live FX Rates</h3>
-          <span className="text-[9px] text-slate-600">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Live FX Rates</h3>
+          <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
             Primary: Google Finance (Sheet J1) &middot; Closest to xe.com mid-market rates
           </span>
         </div>
         <div className="flex flex-wrap gap-3 items-center">
-          <div className="flex items-center gap-2 px-3 py-2 bg-[#111827] rounded-lg border border-cyan-500/30">
-            <span className="text-xs text-slate-400">USDINR</span>
-            <span className="font-mono text-sm text-cyan-400 font-bold">{spot.toFixed(4)}</span>
-            {fxSource && <span className="text-[9px] text-slate-600">{fxSource}</span>}
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "var(--bg-card-hover)", border: "1px solid var(--accent-cyan)" }}>
+            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>USDINR</span>
+            <span className="font-mono text-sm font-bold" style={{ color: "var(--accent-cyan)" }}>{spot.toFixed(4)}</span>
+            {fxSource && <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>{fxSource}</span>}
           </div>
           {pairEntries.map(([pair, rate]) => (
-            <div key={pair} className="flex items-center gap-2 px-3 py-2 bg-[#111827] rounded-lg border border-[#2a3650]">
-              <span className="text-xs text-slate-400">{pair}</span>
-              <span className="font-mono text-sm text-slate-200">{rate.toFixed(4)}</span>
+            <div key={pair} className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "var(--bg-card-hover)", border: "1px solid var(--border)" }}>
+              <span className="text-xs" style={{ color: "var(--text-secondary)" }}>{pair}</span>
+              <span className="font-mono text-sm" style={{ color: "var(--text-primary)" }}>{rate.toFixed(4)}</span>
             </div>
           ))}
         </div>
@@ -237,12 +237,12 @@ export default function DashboardPage() {
         <select
           value={currencyUnit}
           onChange={(e) => setCurrencyUnit(e.target.value as "USD" | "INR")}
-          className="input-field text-xs py-1.5 px-3 w-auto"
+          className="select-field text-xs py-1.5 px-3 w-auto"
         >
           <option value="USD">USD</option>
           <option value="INR">INR</option>
         </select>
-        <span className="text-[10px] text-slate-600">
+        <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
           Currency for exposure &amp; charts
         </span>
       </div>
@@ -251,46 +251,46 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="card">
           <div className="stat-label">Total Exposure</div>
-          <div className="stat-value text-blue-400 mt-1">{exposureFmt}</div>
-          <div className="text-xs text-slate-500 mt-1">{trades.length} trades</div>
+          <div className="stat-value mt-1" style={{ color: "var(--accent-blue)" }}>{exposureFmt}</div>
+          <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{trades.length} trades</div>
         </div>
         <div className="card">
           <div className="stat-label">INR Receipts</div>
-          <div className="stat-value text-cyan-400 mt-1">{inrReceiptsFmt}</div>
+          <div className="stat-value mt-1" style={{ color: "var(--accent-cyan)" }}>{inrReceiptsFmt}</div>
         </div>
         <div className="card">
           <div className="stat-label">Blended Book Rate</div>
-          <div className="stat-value text-amber-400 mt-1">
+          <div className="stat-value mt-1" style={{ color: "var(--accent-amber)" }}>
             {blendedMtb.toFixed(4)}
           </div>
-          <div className="text-xs text-slate-500 mt-1">
+          <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
             MTB weighted avg
           </div>
         </div>
         <div className="card">
           <div className="stat-label">Blended Hedge Rate</div>
-          <div className="stat-value text-purple-400 mt-1">
+          <div className="stat-value mt-1" style={{ color: "var(--accent-purple)" }}>
             {blendedHedgeRate > 0 ? blendedHedgeRate.toFixed(4) : "—"}
           </div>
-          <div className="text-xs text-slate-500 mt-1">
+          <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
             {totalHedgedUsd > 0 ? `${formatUSD(totalHedgedUsd)} hedged` : "No active hedges"}
           </div>
         </div>
         <div className="card">
           <div className="stat-label">INR Spot</div>
-          <div className="stat-value text-cyan-400 mt-1">
+          <div className="stat-value mt-1" style={{ color: "var(--accent-cyan)" }}>
             {spot.toFixed(4)}
           </div>
-          <div className="text-xs text-slate-500 mt-1">
+          <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
             {fxSource || "Live"}
           </div>
         </div>
         <div className="card">
           <div className="stat-label">FX P&L vs Book</div>
-          <div className={`stat-value mt-1 ${fxGainLoss >= 0 ? "text-green-400" : "text-red-400"}`}>
+          <div className="stat-value mt-1" style={{ color: fxGainLoss >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
             {fxGainLoss >= 0 ? "+" : ""}{formatUSD(fxGainLoss)}
           </div>
-          <div className="text-[10px] text-slate-500 mt-1">
+          <div className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
             vs Mark-to-Book rate
           </div>
         </div>
@@ -300,31 +300,31 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Trade-level FX P&L bar chart */}
         <div className="card">
-          <h3 className="text-sm font-semibold text-slate-300 mb-4">
+          <h3 className="text-sm font-semibold mb-4" style={{ color: "var(--text-primary)" }}>
             FX P&L by Trade (MTM - MTB) &middot; {currencyUnit}
           </h3>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={barData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2a3650" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis
                 dataKey="name"
-                tick={{ fill: "#94a3b8", fontSize: 9 }}
-                axisLine={{ stroke: "#2a3650" }}
+                tick={{ fill: "var(--text-secondary)", fontSize: 9 }}
+                axisLine={{ stroke: "var(--border)" }}
                 angle={-20}
                 textAnchor="end"
                 height={60}
               />
               <YAxis
-                tick={{ fill: "#94a3b8", fontSize: 11 }}
-                axisLine={{ stroke: "#2a3650" }}
+                tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
+                axisLine={{ stroke: "var(--border)" }}
                 tickFormatter={(v) => fmt(v)}
               />
               <Tooltip
                 contentStyle={{
-                  background: "#1a2234",
-                  border: "1px solid #2a3650",
+                  background: "var(--bg-card)",
+                  border: "1px solid var(--border)",
                   borderRadius: 8,
-                  color: "#f1f5f9",
+                  color: "var(--text-primary)",
                 }}
                 formatter={(value: number) => [fmt(value), "FX P&L"]}
               />
@@ -332,7 +332,7 @@ export default function DashboardPage() {
                 {barData.map((entry, idx) => (
                   <Cell
                     key={idx}
-                    fill={entry.pnl >= 0 ? "#22c55e" : "#ef4444"}
+                    fill={entry.pnl >= 0 ? "#16a34a" : "#dc2626"}
                   />
                 ))}
               </Bar>
@@ -342,7 +342,7 @@ export default function DashboardPage() {
 
         {/* Exposure by commodity pie chart */}
         <div className="card">
-          <h3 className="text-sm font-semibold text-slate-300 mb-4">
+          <h3 className="text-sm font-semibold mb-4" style={{ color: "var(--text-primary)" }}>
             Exposure by Commodity ({currencyUnit})
           </h3>
           <ResponsiveContainer width="100%" height={280}>
@@ -358,7 +358,7 @@ export default function DashboardPage() {
                 label={({ name, percent }) =>
                   `${name} ${(percent * 100).toFixed(0)}%`
                 }
-                labelLine={{ stroke: "#64748b" }}
+                labelLine={{ stroke: "var(--text-muted)" }}
               >
                 {pieData.map((_, idx) => (
                   <Cell key={idx} fill={COLORS[idx % COLORS.length]} />
@@ -366,10 +366,10 @@ export default function DashboardPage() {
               </Pie>
               <Tooltip
                 contentStyle={{
-                  background: "#1a2234",
-                  border: "1px solid #2a3650",
+                  background: "var(--bg-card)",
+                  border: "1px solid var(--border)",
                   borderRadius: 8,
-                  color: "#f1f5f9",
+                  color: "var(--text-primary)",
                 }}
                 formatter={(value: number) => [fmt(value), "Exposure"]}
               />
@@ -381,28 +381,28 @@ export default function DashboardPage() {
       {/* Maturity timeline */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-slate-300">
+          <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
             Exposure Maturity Timeline ({currencyUnit})
           </h3>
           <div className="flex items-center gap-2">
-            <div className="flex rounded-lg overflow-hidden border border-[#2a3650]">
+            <div className="flex rounded-lg overflow-hidden" style={{ border: "1px solid var(--border)" }}>
               <button
                 onClick={() => setMaturityView("month")}
-                className={`px-3 py-1 text-xs transition-colors ${
-                  maturityView === "month"
-                    ? "bg-blue-500/20 text-blue-400"
-                    : "text-slate-500 hover:text-slate-300"
-                }`}
+                className="px-3 py-1 text-xs transition-colors"
+                style={{
+                  background: maturityView === "month" ? "var(--accent-blue)" : "transparent",
+                  color: maturityView === "month" ? "white" : "var(--text-secondary)",
+                }}
               >
                 Month
               </button>
               <button
                 onClick={() => setMaturityView("day")}
-                className={`px-3 py-1 text-xs transition-colors ${
-                  maturityView === "day"
-                    ? "bg-blue-500/20 text-blue-400"
-                    : "text-slate-500 hover:text-slate-300"
-                }`}
+                className="px-3 py-1 text-xs transition-colors"
+                style={{
+                  background: maturityView === "day" ? "var(--accent-blue)" : "transparent",
+                  color: maturityView === "day" ? "white" : "var(--text-secondary)",
+                }}
               >
                 Day
               </button>
@@ -411,30 +411,30 @@ export default function DashboardPage() {
         </div>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={maturityData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2a3650" />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
             <XAxis
               dataKey="label"
-              tick={{ fill: "#94a3b8", fontSize: maturityView === "day" ? 9 : 11 }}
-              axisLine={{ stroke: "#2a3650" }}
+              tick={{ fill: "var(--text-secondary)", fontSize: maturityView === "day" ? 9 : 11 }}
+              axisLine={{ stroke: "var(--border)" }}
               angle={maturityView === "day" ? -30 : 0}
               textAnchor={maturityView === "day" ? "end" : "middle"}
               height={maturityView === "day" ? 50 : 30}
             />
             <YAxis
-              tick={{ fill: "#94a3b8", fontSize: 11 }}
-              axisLine={{ stroke: "#2a3650" }}
+              tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
+              axisLine={{ stroke: "var(--border)" }}
               tickFormatter={(v) => fmt(v)}
             />
             <Tooltip
               contentStyle={{
-                background: "#1a2234",
-                border: "1px solid #2a3650",
+                background: "var(--bg-card)",
+                border: "1px solid var(--border)",
                 borderRadius: 8,
-                color: "#f1f5f9",
+                color: "var(--text-primary)",
               }}
               formatter={(value: number) => [fmt(value), "Maturing"]}
             />
-            <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="amount" fill="var(--accent-blue)" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

@@ -22,7 +22,7 @@ export function Sidebar() {
       {/* Desktop sidebar */}
       <aside className="hidden md:flex fixed left-0 top-0 h-full w-64 sidebar-bg border-r flex-col z-50">
         {/* Logo */}
-        <div className="px-6 py-5 border-b border-[#2a3650]">
+        <div className="px-6 py-5 border-b" style={{ borderColor: "var(--border)" }}>
           <div className="flex items-center gap-3">
             <img
               src="/hectar-logo.svg"
@@ -30,8 +30,8 @@ export function Sidebar() {
               className="w-9 h-9 rounded-lg"
             />
             <div>
-              <div className="text-lg font-bold text-white tracking-tight">HectarFX</div>
-              <div className="text-[10px] text-slate-500 uppercase tracking-widest">FX Simulator</div>
+              <div className="text-lg font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>HectarFX</div>
+              <div className="text-[10px] uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>FX Simulator</div>
             </div>
           </div>
         </div>
