@@ -1,0 +1,15 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="200" height="200" rx="24" fill="#7C3AED"/>
+  <!-- Left vertical of H with inner curve -->
+  <path d="M50 35 L50 165" stroke="white" stroke-width="14" stroke-linecap="round"/>
+  <path d="M50 55 Q75 100 50 145" stroke="#7C3AED" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <!-- Right vertical of H with inner curve -->
+  <path d="M150 35 L150 165" stroke="white" stroke-width="14" stroke-linecap="round"/>
+  <path d="M150 55 Q125 100 150 145" stroke="#7C3AED" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <!-- Center crossbar curves -->
+  <path d="M50 75 Q100 55 150 75" stroke="white" stroke-width="10" stroke-linecap="round" fill="none"/>
+  <path d="M50 125 Q100 145 150 125" stroke="white" stroke-width="10" stroke-linecap="round" fill="none"/>
+  <!-- Inner decorative curves -->
+  <path d="M65 75 Q100 100 135 75" stroke="white" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <path d="M65 125 Q100 100 135 125" stroke="white" stroke-width="6" stroke-linecap="round" fill="none"/>
+</svg>

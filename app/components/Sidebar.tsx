@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTheme } from "./ThemeProvider";
 
 const navItems = [
   { href: "/", label: "Dashboard", shortLabel: "Home", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
@@ -14,17 +15,20 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex fixed left-0 top-0 h-full w-64 bg-[#111827] border-r border-[#2a3650] flex-col z-50">
+      <aside className="hidden md:flex fixed left-0 top-0 h-full w-64 sidebar-bg border-r flex-col z-50">
         {/* Logo */}
         <div className="px-6 py-5 border-b border-[#2a3650]">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center font-bold text-white text-sm">
-              HX
-            </div>
+            <img
+              src="/hectar-logo.svg"
+              alt="Hectar"
+              className="w-9 h-9 rounded-lg"
+            />
             <div>
               <div className="text-lg font-bold text-white tracking-tight">HectarFX</div>
               <div className="text-[10px] text-slate-500 uppercase tracking-widest">FX Simulator</div>
@@ -52,19 +56,40 @@ export function Sidebar() {
         </nav>
 
         {/* Footer */}
-        <div className="px-4 py-4 border-t border-[#2a3650]">
+        <div className="px-4 py-4 border-t" style={{ borderColor: "var(--border)" }}>
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg mb-3 transition-colors"
+            style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}
+          >
+            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+              {theme === "dark" ? "Dark Mode" : "Light Mode"}
+            </span>
+            <div className="flex items-center gap-1.5">
+              {theme === "dark" ? (
+                <svg className="w-4 h-4 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+                </svg>
+              )}
+            </div>
+          </button>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-            <span className="text-xs text-slate-500">Live</span>
+            <span className="text-xs" style={{ color: "var(--text-muted)" }}>Live</span>
           </div>
-          <div className="text-[10px] text-slate-600 mt-1">
+          <div className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
             Rates auto-refresh every 60s
           </div>
         </div>
       </aside>
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[#111827] border-t border-[#2a3650] z-50 flex justify-around items-center px-1 py-1 safe-bottom">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 sidebar-bg border-t z-50 flex justify-around items-center px-1 py-1 safe-bottom">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           return (
@@ -74,8 +99,9 @@ export function Sidebar() {
               className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-center min-w-0 flex-1 transition-colors ${
                 isActive
                   ? "text-blue-400 bg-blue-600/10"
-                  : "text-slate-500"
+                  : ""
               }`}
+              style={!isActive ? { color: "var(--text-muted)" } : undefined}
             >
               <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
@@ -84,6 +110,23 @@ export function Sidebar() {
             </Link>
           );
         })}
+        {/* Theme toggle on mobile */}
+        <button
+          onClick={toggleTheme}
+          className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-center min-w-0 transition-colors"
+          style={{ color: "var(--text-muted)" }}
+        >
+          {theme === "dark" ? (
+            <svg className="w-5 h-5 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+            </svg>
+          )}
+          <span className="text-[9px] leading-tight">Theme</span>
+        </button>
       </nav>
     </>
   );

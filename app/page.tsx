@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import Link from "next/link";
+// Link removed - no longer needed for this page
 import {
   BarChart,
   Bar,
@@ -41,14 +41,6 @@ type FxData = {
   updatedAt?: string;
 };
 
-type Suggestion = {
-  strategy: string;
-  label: string;
-  rationale: string;
-  expectedSavingInr: number;
-  riskLevel: string;
-  confidence: number;
-};
 
 const COLORS = ["#3b82f6", "#06b6d4", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"];
 
@@ -71,12 +63,14 @@ export default function DashboardPage() {
   const [fx, setFx] = useState<FxData | null>(null);
   const [pairs, setPairs] = useState<Record<string, number>>({});
   const [fxSource, setFxSource] = useState("");
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Toggles
-  const [maturityView, setMaturityView] = useState<"month" | "day">("month");
+  // Toggles - default to day view for maturity timeline
+  const [maturityView, setMaturityView] = useState<"month" | "day">("day");
   const [currencyUnit, setCurrencyUnit] = useState<"USD" | "INR">("USD");
+
+  // Hedges for blended hedged rate
+  const [hedges, setHedges] = useState<{ usdAmount: number; rate: number; status: string }[]>([]);
 
   const fetchFx = useCallback(async () => {
     try {
@@ -94,22 +88,13 @@ export default function DashboardPage() {
     Promise.all([
       fetch("/api/trades").then((r) => r.json()),
       fetch("/api/fx").then((r) => r.json()),
-    ]).then(([tradesData, fxData]) => {
+      fetch("/api/hedges").then((r) => r.json()),
+    ]).then(([tradesData, fxData, hedgesData]) => {
       setTrades(tradesData.trades || []);
       setFx(fxData.fx);
       setPairs(fxData.pairs || {});
       setFxSource(fxData.source || "");
-
-      if (tradesData.trades?.length && fxData.fx) {
-        fetch("/api/suggestions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ trades: tradesData.trades, fx: fxData.fx }),
-        })
-          .then((r) => r.json())
-          .then((d) => setSuggestions(d.suggestions || []));
-      }
-
+      setHedges(hedgesData.hedges || []);
       setLoading(false);
     });
 
@@ -137,6 +122,18 @@ export default function DashboardPage() {
     totalUsd > 0
       ? trades.reduce((s, t) => s + t.mtbFx * t.usdInvoice, 0) / totalUsd
       : 0;
+
+  // Blended hedged rate from active hedges
+  const activeHedges = hedges.filter((h) => h.status === "ACTIVE");
+  const totalHedgedUsd = activeHedges.reduce((s, h) => s + h.usdAmount, 0);
+  const blendedHedgeRate =
+    totalHedgedUsd > 0
+      ? activeHedges.reduce((s, h) => s + h.rate * h.usdAmount, 0) / totalHedgedUsd
+      : 0;
+
+  // FX Loss/Gain is calculated vs Mark-to-Book (what traders booked the deal at)
+  // If spot drops (INR strengthens), we get fewer INR per USD = gain vs book
+  // If spot rises (INR weakens), we pay more INR per USD = loss vs book
 
   // FX P&L per trade - in selected currency
   const barData = trades.map((t) => {
@@ -250,15 +247,15 @@ export default function DashboardPage() {
         </span>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      {/* KPI Cards - Flow: Exposure → INR Receipts → Book Rate → Hedged Rate → Spot → P&L */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="card">
           <div className="stat-label">Total Exposure</div>
           <div className="stat-value text-blue-400 mt-1">{exposureFmt}</div>
-          <div className="text-xs text-slate-500 mt-1">{trades.length} active trades</div>
+          <div className="text-xs text-slate-500 mt-1">{trades.length} trades</div>
         </div>
         <div className="card">
-          <div className="stat-label">Expected INR Receipts</div>
+          <div className="stat-label">INR Receipts</div>
           <div className="stat-value text-cyan-400 mt-1">{inrReceiptsFmt}</div>
         </div>
         <div className="card">
@@ -267,22 +264,34 @@ export default function DashboardPage() {
             {blendedMtb.toFixed(4)}
           </div>
           <div className="text-xs text-slate-500 mt-1">
-            Spot: {spot.toFixed(4)}
+            MTB weighted avg
           </div>
         </div>
         <div className="card">
-          <div className="stat-label">MTB / MTM Totals</div>
-          <div className="stat-value text-slate-200 mt-1">
-            {formatUSD(totalMtb)} / {formatUSD(totalMtm)}
+          <div className="stat-label">Blended Hedge Rate</div>
+          <div className="stat-value text-purple-400 mt-1">
+            {blendedHedgeRate > 0 ? blendedHedgeRate.toFixed(4) : "—"}
+          </div>
+          <div className="text-xs text-slate-500 mt-1">
+            {totalHedgedUsd > 0 ? `${formatUSD(totalHedgedUsd)} hedged` : "No active hedges"}
           </div>
         </div>
         <div className="card">
-          <div className="stat-label">FX Loss/Gain</div>
+          <div className="stat-label">INR Spot</div>
+          <div className="stat-value text-cyan-400 mt-1">
+            {spot.toFixed(4)}
+          </div>
+          <div className="text-xs text-slate-500 mt-1">
+            {fxSource || "Live"}
+          </div>
+        </div>
+        <div className="card">
+          <div className="stat-label">FX P&L vs Book</div>
           <div className={`stat-value mt-1 ${fxGainLoss >= 0 ? "text-green-400" : "text-red-400"}`}>
             {fxGainLoss >= 0 ? "+" : ""}{formatUSD(fxGainLoss)}
           </div>
-          <div className="mt-1">
-            <PnlBadge value={fxGainLoss} format="USD" />
+          <div className="text-[10px] text-slate-500 mt-1">
+            vs Mark-to-Book rate
           </div>
         </div>
       </div>
@@ -430,92 +439,6 @@ export default function DashboardPage() {
         </ResponsiveContainer>
       </div>
 
-      {/* Strategy Suggestions */}
-      {suggestions.length > 0 && (
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-slate-300">
-              Strategy Suggestions
-            </h3>
-            <Link href="/simulator" className="text-xs text-blue-400 hover:text-blue-300">
-              Open Simulator &rarr;
-            </Link>
-          </div>
-          <div className="space-y-3">
-            {suggestions.map((s, i) => (
-              <div
-                key={i}
-                className="p-4 bg-[#111827] rounded-lg border border-[#2a3650] hover:border-blue-500/30 transition-colors"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-slate-200">
-                        {s.label}
-                      </span>
-                      <span
-                        className={`badge ${
-                          s.riskLevel === "LOW"
-                            ? "badge-green"
-                            : s.riskLevel === "MEDIUM"
-                            ? "badge-amber"
-                            : "badge-red"
-                        }`}
-                      >
-                        {s.riskLevel} risk
-                      </span>
-                      <span className="badge-blue">
-                        {Math.round(s.confidence * 100)}% confidence
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                      {s.rationale}
-                    </p>
-                  </div>
-                  <div className="text-right ml-4 flex-shrink-0">
-                    <div className="text-xs text-slate-500">Est. Saving</div>
-                    <div className="text-sm font-medium text-green-400">
-                      {formatINR(s.expectedSavingInr)}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Forward Rates Quick View */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-slate-300">Forward Curve</h3>
-          <Link href="/simulator" className="text-xs text-blue-400 hover:text-blue-300">
-            Simulator &rarr;
-          </Link>
-        </div>
-        <div className="grid grid-cols-4 md:grid-cols-7 gap-4">
-          {[
-            { label: "Spot", rate: fx.spot },
-            { label: "1M Fwd", rate: fx.fwd1m },
-            { label: "2M Fwd", rate: fx.fwd2m },
-            { label: "3M Fwd", rate: fx.fwd3m },
-            ...(fx.fwd6m ? [{ label: "6M Fwd", rate: fx.fwd6m }] : []),
-            ...(fx.fwd12m ? [{ label: "12M Fwd", rate: fx.fwd12m }] : []),
-          ].map((item) => (
-            <div key={item.label} className="text-center">
-              <div className="text-xs text-slate-500">{item.label}</div>
-              <div className="text-lg font-semibold text-slate-200 mt-1">
-                {item.rate.toFixed(4)}
-              </div>
-              {item.label !== "Spot" && (
-                <div className="text-[10px] text-slate-500 mt-0.5">
-                  +{((item.rate - fx.spot) * 100).toFixed(1)} paise
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
