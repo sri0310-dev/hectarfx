@@ -98,15 +98,35 @@ export default function SimulatorPage() {
   const [fxSource, setFxSource] = useState("");
   const [scenarioSpot, setScenarioSpot] = useState("");
   const [loading, setLoading] = useState(true);
+  const [liveGhsRate, setLiveGhsRate] = useState<number | null>(null);
 
   // Quick Compare popup state
   const [showCompare, setShowCompare] = useState(false);
   const [compareAmount, setCompareAmount] = useState("1cr");
-  const [compareRates, setCompareRates] = useState(["90.58", "90.68", "90.78"]);
+  const [compareRates, setCompareRates] = useState<string[]>([]);
   const [compareFromCurrency, setCompareFromCurrency] = useState<"INR" | "USD">("INR");
   const [compareToCurrency, setCompareToCurrency] = useState<"USD" | "INR" | "GHS">("USD");
-  // GHS rate (USD to Ghana Cedi) - user can edit this
+  // GHS rate (USD to Ghana Cedi) - from API or user edit
   const [ghsRate, setGhsRate] = useState("15.50");
+  const [compareRatesInitialized, setCompareRatesInitialized] = useState(false);
+
+  // Generate default compare rates based on spot (spot, spot+0.10, spot+0.20)
+  function getDefaultRates(spot: number): string[] {
+    return [
+      spot.toFixed(2),
+      (spot + 0.10).toFixed(2),
+      (spot + 0.20).toFixed(2),
+    ];
+  }
+
+  // Generate default GHS compare rates based on GHS rate
+  function getDefaultGhsRates(rate: number): string[] {
+    return [
+      rate.toFixed(2),
+      (rate + 0.10).toFixed(2),
+      (rate + 0.20).toFixed(2),
+    ];
+  }
 
   const [activeHedges, setActiveHedges] = useState<ActiveHedge[]>([]);
   const [simHedges, setSimHedges] = useState<SimHedge[]>([]);
@@ -121,7 +141,14 @@ export default function SimulatorPage() {
     try {
       const res = await fetch("/api/fx");
       const data = await res.json();
-      if (data.fx?.spot) { setLiveSpot(data.fx.spot); setFxSource(data.source || ""); }
+      if (data.fx?.spot) {
+        setLiveSpot(data.fx.spot);
+        setFxSource(data.source || "");
+      }
+      if (data.ghsRate) {
+        setLiveGhsRate(data.ghsRate);
+        setGhsRate(data.ghsRate.toFixed(2));
+      }
     } catch { /* silent */ }
   }, []);
 
@@ -136,12 +163,22 @@ export default function SimulatorPage() {
       setLiveSpot(spot);
       setFxSource(fd.source || "");
       setScenarioSpot(spot.toFixed(4));
+      // Initialize compare rates based on live spot
+      if (!compareRatesInitialized) {
+        setCompareRates(getDefaultRates(spot));
+        setCompareRatesInitialized(true);
+      }
+      // Get GHS rate from API
+      if (fd.ghsRate) {
+        setLiveGhsRate(fd.ghsRate);
+        setGhsRate(fd.ghsRate.toFixed(2));
+      }
       setActiveHedges((hd.hedges || []).filter((h: ActiveHedge) => h.status === "ACTIVE"));
       setLoading(false);
     });
     const interval = setInterval(fetchFx, 60_000);
     return () => clearInterval(interval);
-  }, [fetchFx]);
+  }, [fetchFx, compareRatesInitialized]);
 
   // Sim hedge management
   function addSimHedge() {
@@ -730,8 +767,13 @@ export default function SimulatorPage() {
                   <div className="flex rounded overflow-hidden" style={{ border: "1px solid var(--border)" }}>
                     <button
                       onClick={() => {
-                        setCompareFromCurrency("INR");
-                        if (compareToCurrency === "INR") setCompareToCurrency("USD");
+                        if (compareFromCurrency !== "INR") {
+                          setCompareFromCurrency("INR");
+                          setCompareToCurrency("USD");
+                          // Reset to INR defaults: 1cr, USD/INR rates
+                          setCompareAmount("1cr");
+                          setCompareRates(getDefaultRates(liveSpot));
+                        }
                       }}
                       className="flex-1 px-3 py-2 text-sm font-medium transition-colors"
                       style={{
@@ -743,8 +785,13 @@ export default function SimulatorPage() {
                     </button>
                     <button
                       onClick={() => {
-                        setCompareFromCurrency("USD");
-                        if (compareToCurrency === "USD") setCompareToCurrency("INR");
+                        if (compareFromCurrency !== "USD") {
+                          setCompareFromCurrency("USD");
+                          setCompareToCurrency("INR");
+                          // Reset to USD defaults: $100k, USD/INR rates
+                          setCompareAmount("100k");
+                          setCompareRates(getDefaultRates(liveSpot));
+                        }
                       }}
                       className="flex-1 px-3 py-2 text-sm font-medium transition-colors"
                       style={{
@@ -772,7 +819,13 @@ export default function SimulatorPage() {
                     ) : (
                       <>
                         <button
-                          onClick={() => setCompareToCurrency("INR")}
+                          onClick={() => {
+                            if (compareToCurrency !== "INR") {
+                              setCompareToCurrency("INR");
+                              // Reset to USD/INR rates
+                              setCompareRates(getDefaultRates(liveSpot));
+                            }
+                          }}
                           className="flex-1 px-3 py-2 text-sm font-medium transition-colors"
                           style={{
                             background: compareToCurrency === "INR" ? "var(--accent-amber)" : "transparent",
@@ -782,7 +835,14 @@ export default function SimulatorPage() {
                           INR
                         </button>
                         <button
-                          onClick={() => setCompareToCurrency("GHS")}
+                          onClick={() => {
+                            if (compareToCurrency !== "GHS") {
+                              setCompareToCurrency("GHS");
+                              // Reset to USD/GHS rates
+                              const baseGhs = liveGhsRate || parseFloat(ghsRate) || 15.50;
+                              setCompareRates(getDefaultGhsRates(baseGhs));
+                            }
+                          }}
                           className="flex-1 px-3 py-2 text-sm font-medium transition-colors"
                           style={{
                             background: compareToCurrency === "GHS" ? "var(--accent-green)" : "transparent",
@@ -800,15 +860,24 @@ export default function SimulatorPage() {
               {/* GHS Rate input when converting to Cedi */}
               {compareFromCurrency === "USD" && compareToCurrency === "GHS" && (
                 <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
-                  <label className="text-xs mb-1 block" style={{ color: "var(--text-muted)" }}>USD/GHS Rate</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="input-field text-sm font-mono py-2 w-32"
-                    value={ghsRate}
-                    onChange={(e) => setGhsRate(e.target.value)}
-                    placeholder="15.50"
-                  />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-xs mb-1 block" style={{ color: "var(--text-muted)" }}>USD/GHS Base Rate</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="input-field text-sm font-mono py-2 w-32"
+                        value={ghsRate}
+                        onChange={(e) => setGhsRate(e.target.value)}
+                        placeholder="15.50"
+                      />
+                    </div>
+                    {liveGhsRate && (
+                      <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                        Live: <span className="font-mono" style={{ color: "var(--accent-green)" }}>{liveGhsRate.toFixed(4)}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

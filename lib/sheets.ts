@@ -123,6 +123,24 @@ export async function fetchSpotFromSheet(): Promise<number | null> {
   return null;
 }
 
+// Fetch USD/GHS rate from Google Finance formula in FXStrat cell J2
+export async function fetchGhsRateFromSheet(): Promise<number | null> {
+  const sheetId = process.env.SHEET_ID;
+  if (!sheetId) return null;
+
+  try {
+    const rows = await readSheetValues(sheetId, "USD-INR!J2");
+    if (rows.length > 0 && rows[0].length > 0) {
+      const raw = String(rows[0][0]).replace(/[^0-9.]/g, "");
+      const rate = parseFloat(raw);
+      if (rate > 1 && rate < 100) return rate; // GHS typically 10-20 range
+    }
+  } catch {
+    // Sheet unavailable — caller should fall back
+  }
+  return null;
+}
+
 // Demo trades matching your actual sheet structure
 export function getDemoTrades(): Trade[] {
   return [

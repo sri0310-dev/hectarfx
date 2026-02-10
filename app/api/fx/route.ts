@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { forwardRate } from "@/lib/fx";
-import { fetchSpotFromSheet } from "@/lib/sheets";
+import { fetchSpotFromSheet, fetchGhsRateFromSheet } from "@/lib/sheets";
 import { FxBoard } from "@/lib/types";
 
 // ── Primary: Google Finance rate from the Google Sheet cell J1 ──
@@ -86,6 +86,7 @@ async function fetchMultiPairRates(): Promise<Record<string, number>> {
 // Cache with 60-second TTL
 let cachedFx: FxBoard | null = null;
 let cachedPairs: Record<string, number> = {};
+let cachedGhsRate: number | null = null;
 let cacheSource = "";
 let lastFetchTime = 0;
 const CACHE_TTL_MS = 60_000;
@@ -100,11 +101,11 @@ function computeForwards(spot: number): Partial<FxBoard> {
   };
 }
 
-async function getLatestFx(): Promise<{ fx: FxBoard; pairs: Record<string, number>; source: string }> {
+async function getLatestFx(): Promise<{ fx: FxBoard; pairs: Record<string, number>; ghsRate: number | null; source: string }> {
   const now = Date.now();
 
   if (cachedFx && now - lastFetchTime < CACHE_TTL_MS) {
-    return { fx: cachedFx, pairs: cachedPairs, source: cacheSource };
+    return { fx: cachedFx, pairs: cachedPairs, ghsRate: cachedGhsRate, source: cacheSource };
   }
 
   // Priority chain: 1) Google Sheet J1 (Google Finance), 2) Free APIs, 3) Fallback
@@ -123,6 +124,9 @@ async function getLatestFx(): Promise<{ fx: FxBoard; pairs: Record<string, numbe
     }
   }
 
+  // Fetch GHS rate from sheet (USD/GHS from J2)
+  const ghsRate = await fetchGhsRateFromSheet();
+
   // Fetch multi-pair rates in parallel (best effort)
   const pairResult = await fetchMultiPairRates();
 
@@ -139,10 +143,11 @@ async function getLatestFx(): Promise<{ fx: FxBoard; pairs: Record<string, numbe
 
   cachedFx = fx;
   cachedPairs = pairResult;
+  cachedGhsRate = ghsRate;
   cacheSource = source;
   lastFetchTime = now;
 
-  return { fx, pairs: pairResult, source };
+  return { fx, pairs: pairResult, ghsRate, source };
 }
 
 // Force dynamic — never cache at CDN/build time
@@ -150,8 +155,8 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET() {
-  const { fx, pairs, source } = await getLatestFx();
-  return NextResponse.json({ fx, pairs, source });
+  const { fx, pairs, ghsRate, source } = await getLatestFx();
+  return NextResponse.json({ fx, pairs, ghsRate, source });
 }
 
 export async function POST(req: Request) {
@@ -172,10 +177,10 @@ export async function POST(req: Request) {
       cachedFx = fx;
       lastFetchTime = Date.now();
       cacheSource = "manual";
-      return NextResponse.json({ fx, pairs: cachedPairs, source: "manual" });
+      return NextResponse.json({ fx, pairs: cachedPairs, ghsRate: cachedGhsRate, source: "manual" });
     }
-    const { fx, pairs, source } = await getLatestFx();
-    return NextResponse.json({ fx, pairs, source });
+    const { fx, pairs, ghsRate, source } = await getLatestFx();
+    return NextResponse.json({ fx, pairs, ghsRate, source });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
