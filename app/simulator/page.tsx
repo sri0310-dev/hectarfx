@@ -99,6 +99,11 @@ export default function SimulatorPage() {
   const [scenarioSpot, setScenarioSpot] = useState("");
   const [loading, setLoading] = useState(true);
 
+  // Quick Compare popup state
+  const [showCompare, setShowCompare] = useState(false);
+  const [compareAmount, setCompareAmount] = useState("1cr");
+  const [compareRates, setCompareRates] = useState(["90.58", "90.68", "90.78"]);
+
   const [activeHedges, setActiveHedges] = useState<ActiveHedge[]>([]);
   const [simHedges, setSimHedges] = useState<SimHedge[]>([]);
 
@@ -305,12 +310,21 @@ export default function SimulatorPage() {
 
   return (
     <div className="max-w-[1400px]">
-      <div className="mb-5">
-        <h1 className="text-2xl md:text-3xl font-bold" style={{ color: "var(--text-primary)" }}>Simulator</h1>
-        <p className="text-sm md:text-base mt-1" style={{ color: "var(--text-secondary)" }}>
-          {trades.length} trades &middot; {formatUSD(analysis.totalUsdExposure)} exposure
-          &middot; {activeHedges.length} active hedge{activeHedges.length !== 1 ? "s" : ""}
-        </p>
+      <div className="flex items-start justify-between mb-5">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold" style={{ color: "var(--text-primary)" }}>Simulator</h1>
+          <p className="text-sm md:text-base mt-1" style={{ color: "var(--text-secondary)" }}>
+            {trades.length} trades &middot; {formatUSD(analysis.totalUsdExposure)} exposure
+            &middot; {activeHedges.length} active hedge{activeHedges.length !== 1 ? "s" : ""}
+          </p>
+        </div>
+        <button
+          onClick={() => setShowCompare(true)}
+          className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          style={{ background: "var(--accent-purple)", color: "white" }}
+        >
+          Quick Compare
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-5">
@@ -694,6 +708,142 @@ export default function SimulatorPage() {
           </div>
         </div>
       </div>
+
+      {/* Quick Compare Modal */}
+      {showCompare && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }}>
+          <div className="w-full max-w-lg rounded-xl p-6" style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>Quick Rate Compare</h2>
+              <button onClick={() => setShowCompare(false)} className="text-2xl leading-none" style={{ color: "var(--text-muted)" }}>&times;</button>
+            </div>
+
+            <div className="mb-4">
+              <label className="text-sm mb-2 block" style={{ color: "var(--text-secondary)" }}>INR Amount (use shortcuts: 1cr, 50l, etc.)</label>
+              <input
+                type="text"
+                className="input-field text-lg font-mono py-3"
+                placeholder="1cr"
+                value={compareAmount}
+                onChange={(e) => setCompareAmount(e.target.value)}
+              />
+              {parseSmartNumber(compareAmount) > 0 && (
+                <div className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
+                  = {formatINR(parseSmartNumber(compareAmount))}
+                </div>
+              )}
+            </div>
+
+            <div className="mb-4">
+              <label className="text-sm mb-2 block" style={{ color: "var(--text-secondary)" }}>Rates to Compare</label>
+              <div className="space-y-2">
+                {compareRates.map((rate, idx) => (
+                  <div key={idx} className="flex gap-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="input-field text-base font-mono py-2 flex-1"
+                      placeholder="90.50"
+                      value={rate}
+                      onChange={(e) => {
+                        const newRates = [...compareRates];
+                        newRates[idx] = e.target.value;
+                        setCompareRates(newRates);
+                      }}
+                    />
+                    {compareRates.length > 2 && (
+                      <button
+                        onClick={() => setCompareRates(compareRates.filter((_, i) => i !== idx))}
+                        className="px-3 rounded"
+                        style={{ color: "var(--accent-red)", border: "1px solid var(--border)" }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => setCompareRates([...compareRates, ""])}
+                className="text-sm mt-2 px-3 py-1 rounded"
+                style={{ color: "var(--accent-blue)", border: "1px solid var(--accent-blue)" }}
+              >
+                + Add Rate
+              </button>
+            </div>
+
+            {/* Results */}
+            {parseSmartNumber(compareAmount) > 0 && compareRates.some(r => parseFloat(r) > 0) && (
+              <div className="rounded-lg p-4 mb-4" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
+                <div className="text-sm font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
+                  {formatINR(parseSmartNumber(compareAmount))} converts to:
+                </div>
+                <div className="space-y-3">
+                  {compareRates.map((rateStr, idx) => {
+                    const rate = parseFloat(rateStr) || 0;
+                    if (rate <= 0) return null;
+                    const inr = parseSmartNumber(compareAmount);
+                    const usd = inr / rate;
+                    const baseRate = parseFloat(compareRates[0]) || 0;
+                    const baseUsd = baseRate > 0 ? inr / baseRate : 0;
+                    const diff = usd - baseUsd;
+                    return (
+                      <div key={idx} className="flex items-center justify-between py-2" style={{ borderBottom: idx < compareRates.length - 1 ? "1px solid var(--border)" : "none" }}>
+                        <div>
+                          <span className="text-lg font-mono font-bold" style={{ color: "var(--accent-amber)" }}>{rate.toFixed(4)}</span>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-lg font-mono font-bold" style={{ color: "var(--accent-cyan)" }}>
+                            ${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                          {idx > 0 && baseUsd > 0 && (
+                            <div className="text-sm font-mono" style={{ color: diff >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                              {diff >= 0 ? "+" : ""}{diff.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} vs first
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Summary comparison */}
+                {compareRates.filter(r => parseFloat(r) > 0).length >= 2 && (() => {
+                  const inr = parseSmartNumber(compareAmount);
+                  const validRates = compareRates.map(r => parseFloat(r) || 0).filter(r => r > 0);
+                  const minRate = Math.min(...validRates);
+                  const maxRate = Math.max(...validRates);
+                  const usdAtMin = inr / minRate;
+                  const usdAtMax = inr / maxRate;
+                  const totalDiff = usdAtMin - usdAtMax;
+                  return (
+                    <div className="mt-4 pt-3" style={{ borderTop: "2px solid var(--border)" }}>
+                      <div className="text-sm" style={{ color: "var(--text-muted)" }}>
+                        Rate range: <strong style={{ color: "var(--text-primary)" }}>{minRate.toFixed(4)} → {maxRate.toFixed(4)}</strong>
+                      </div>
+                      <div className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
+                        Difference: <strong style={{ color: totalDiff >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                          ${Math.abs(totalDiff).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </strong> {totalDiff >= 0 ? "more" : "less"} at lower rate
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowCompare(false)}
+                className="px-4 py-2 rounded-lg text-sm font-medium"
+                style={{ background: "var(--bg-card-hover)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
