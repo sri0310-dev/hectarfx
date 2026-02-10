@@ -862,6 +862,15 @@ export default function SimulatorPage() {
                 </div>
               </div>
 
+              {/* Live USD/INR rate for INR↔USD modes */}
+              {(compareFromCurrency === "INR" || (compareFromCurrency === "USD" && compareToCurrency === "INR")) && liveSpot > 0 && (
+                <div className="mt-3 pt-3 flex items-center justify-end" style={{ borderTop: "1px solid var(--border)" }}>
+                  <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                    Live USD/INR: <span className="font-mono font-medium" style={{ color: "var(--accent-cyan)" }}>{liveSpot.toFixed(4)}</span>
+                  </div>
+                </div>
+              )}
+
               {/* GHS Rate input when converting to Cedi */}
               {compareFromCurrency === "USD" && compareToCurrency === "GHS" && (
                 <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
@@ -879,7 +888,7 @@ export default function SimulatorPage() {
                     </div>
                     {liveGhsRate && (
                       <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-                        Live: <span className="font-mono" style={{ color: "var(--accent-green)" }}>{liveGhsRate.toFixed(4)}</span>
+                        Live: <span className="font-mono font-medium" style={{ color: "var(--accent-green)" }}>{liveGhsRate.toFixed(4)}</span>
                       </div>
                     )}
                   </div>
