@@ -103,6 +103,10 @@ export default function SimulatorPage() {
   const [showCompare, setShowCompare] = useState(false);
   const [compareAmount, setCompareAmount] = useState("1cr");
   const [compareRates, setCompareRates] = useState(["90.58", "90.68", "90.78"]);
+  const [compareFromCurrency, setCompareFromCurrency] = useState<"INR" | "USD">("INR");
+  const [compareToCurrency, setCompareToCurrency] = useState<"USD" | "INR" | "GHS">("USD");
+  // GHS rate (USD to Ghana Cedi) - user can edit this
+  const [ghsRate, setGhsRate] = useState("15.50");
 
   const [activeHedges, setActiveHedges] = useState<ActiveHedge[]>([]);
   const [simHedges, setSimHedges] = useState<SimHedge[]>([]);
@@ -718,24 +722,119 @@ export default function SimulatorPage() {
               <button onClick={() => setShowCompare(false)} className="text-2xl leading-none" style={{ color: "var(--text-muted)" }}>&times;</button>
             </div>
 
-            <div className="mb-4">
-              <label className="text-sm mb-2 block" style={{ color: "var(--text-secondary)" }}>INR Amount (use shortcuts: 1cr, 50l, etc.)</label>
-              <input
-                type="text"
-                className="input-field text-lg font-mono py-3"
-                placeholder="1cr"
-                value={compareAmount}
-                onChange={(e) => setCompareAmount(e.target.value)}
-              />
-              {parseSmartNumber(compareAmount) > 0 && (
-                <div className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
-                  = {formatINR(parseSmartNumber(compareAmount))}
+            {/* Currency Direction Selector */}
+            <div className="mb-4 p-3 rounded-lg" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <label className="text-xs mb-1 block" style={{ color: "var(--text-muted)" }}>From</label>
+                  <div className="flex rounded overflow-hidden" style={{ border: "1px solid var(--border)" }}>
+                    <button
+                      onClick={() => {
+                        setCompareFromCurrency("INR");
+                        if (compareToCurrency === "INR") setCompareToCurrency("USD");
+                      }}
+                      className="flex-1 px-3 py-2 text-sm font-medium transition-colors"
+                      style={{
+                        background: compareFromCurrency === "INR" ? "var(--accent-amber)" : "transparent",
+                        color: compareFromCurrency === "INR" ? "white" : "var(--text-muted)",
+                      }}
+                    >
+                      INR
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCompareFromCurrency("USD");
+                        if (compareToCurrency === "USD") setCompareToCurrency("INR");
+                      }}
+                      className="flex-1 px-3 py-2 text-sm font-medium transition-colors"
+                      style={{
+                        background: compareFromCurrency === "USD" ? "var(--accent-cyan)" : "transparent",
+                        color: compareFromCurrency === "USD" ? "white" : "var(--text-muted)",
+                      }}
+                    >
+                      USD
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-5" style={{ color: "var(--text-muted)" }}>→</div>
+
+                <div className="flex-1">
+                  <label className="text-xs mb-1 block" style={{ color: "var(--text-muted)" }}>To</label>
+                  <div className="flex rounded overflow-hidden" style={{ border: "1px solid var(--border)" }}>
+                    {compareFromCurrency === "INR" ? (
+                      <button
+                        className="flex-1 px-3 py-2 text-sm font-medium"
+                        style={{ background: "var(--accent-cyan)", color: "white" }}
+                      >
+                        USD
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => setCompareToCurrency("INR")}
+                          className="flex-1 px-3 py-2 text-sm font-medium transition-colors"
+                          style={{
+                            background: compareToCurrency === "INR" ? "var(--accent-amber)" : "transparent",
+                            color: compareToCurrency === "INR" ? "white" : "var(--text-muted)",
+                          }}
+                        >
+                          INR
+                        </button>
+                        <button
+                          onClick={() => setCompareToCurrency("GHS")}
+                          className="flex-1 px-3 py-2 text-sm font-medium transition-colors"
+                          style={{
+                            background: compareToCurrency === "GHS" ? "var(--accent-green)" : "transparent",
+                            color: compareToCurrency === "GHS" ? "white" : "var(--text-muted)",
+                          }}
+                        >
+                          GHS
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* GHS Rate input when converting to Cedi */}
+              {compareFromCurrency === "USD" && compareToCurrency === "GHS" && (
+                <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+                  <label className="text-xs mb-1 block" style={{ color: "var(--text-muted)" }}>USD/GHS Rate</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input-field text-sm font-mono py-2 w-32"
+                    value={ghsRate}
+                    onChange={(e) => setGhsRate(e.target.value)}
+                    placeholder="15.50"
+                  />
                 </div>
               )}
             </div>
 
             <div className="mb-4">
-              <label className="text-sm mb-2 block" style={{ color: "var(--text-secondary)" }}>Rates to Compare</label>
+              <label className="text-sm mb-2 block" style={{ color: "var(--text-secondary)" }}>
+                {compareFromCurrency === "INR" ? "INR Amount (use shortcuts: 1cr, 50l, etc.)" : "USD Amount (use shortcuts: 80k, 1m, etc.)"}
+              </label>
+              <input
+                type="text"
+                className="input-field text-lg font-mono py-3"
+                placeholder={compareFromCurrency === "INR" ? "1cr" : "100k"}
+                value={compareAmount}
+                onChange={(e) => setCompareAmount(e.target.value)}
+              />
+              {parseSmartNumber(compareAmount) > 0 && (
+                <div className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
+                  = {compareFromCurrency === "INR" ? formatINR(parseSmartNumber(compareAmount)) : formatUSD(parseSmartNumber(compareAmount))}
+                </div>
+              )}
+            </div>
+
+            <div className="mb-4">
+              <label className="text-sm mb-2 block" style={{ color: "var(--text-secondary)" }}>
+                {compareFromCurrency === "INR" ? "USD/INR Rates to Compare" : compareToCurrency === "INR" ? "USD/INR Rates to Compare" : "USD/GHS Rates to Compare"}
+              </label>
               <div className="space-y-2">
                 {compareRates.map((rate, idx) => (
                   <div key={idx} className="flex gap-2">
@@ -743,7 +842,7 @@ export default function SimulatorPage() {
                       type="number"
                       step="0.01"
                       className="input-field text-base font-mono py-2 flex-1"
-                      placeholder="90.50"
+                      placeholder={compareToCurrency === "GHS" ? "15.50" : "90.50"}
                       value={rate}
                       onChange={(e) => {
                         const newRates = [...compareRates];
@@ -776,29 +875,67 @@ export default function SimulatorPage() {
             {parseSmartNumber(compareAmount) > 0 && compareRates.some(r => parseFloat(r) > 0) && (
               <div className="rounded-lg p-4 mb-4" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
                 <div className="text-sm font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
-                  {formatINR(parseSmartNumber(compareAmount))} converts to:
+                  {compareFromCurrency === "INR"
+                    ? `${formatINR(parseSmartNumber(compareAmount))} converts to:`
+                    : `${formatUSD(parseSmartNumber(compareAmount))} converts to:`
+                  }
                 </div>
                 <div className="space-y-3">
                   {compareRates.map((rateStr, idx) => {
                     const rate = parseFloat(rateStr) || 0;
                     if (rate <= 0) return null;
-                    const inr = parseSmartNumber(compareAmount);
-                    const usd = inr / rate;
+                    const sourceAmount = parseSmartNumber(compareAmount);
+
+                    // Calculate based on direction
+                    let result: number;
+                    let resultLabel: string;
+                    let resultColor: string;
+
+                    if (compareFromCurrency === "INR") {
+                      // INR → USD: divide by rate
+                      result = sourceAmount / rate;
+                      resultLabel = `$${result.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                      resultColor = "var(--accent-cyan)";
+                    } else if (compareToCurrency === "INR") {
+                      // USD → INR: multiply by rate
+                      result = sourceAmount * rate;
+                      resultLabel = formatINR(result);
+                      resultColor = "var(--accent-amber)";
+                    } else {
+                      // USD → GHS: multiply by rate
+                      result = sourceAmount * rate;
+                      resultLabel = `GHS ${result.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                      resultColor = "var(--accent-green)";
+                    }
+
+                    // Calculate difference from first rate
                     const baseRate = parseFloat(compareRates[0]) || 0;
-                    const baseUsd = baseRate > 0 ? inr / baseRate : 0;
-                    const diff = usd - baseUsd;
+                    let baseResult: number;
+                    if (compareFromCurrency === "INR") {
+                      baseResult = baseRate > 0 ? sourceAmount / baseRate : 0;
+                    } else {
+                      baseResult = baseRate > 0 ? sourceAmount * baseRate : 0;
+                    }
+                    const diff = result - baseResult;
+
                     return (
                       <div key={idx} className="flex items-center justify-between py-2" style={{ borderBottom: idx < compareRates.length - 1 ? "1px solid var(--border)" : "none" }}>
                         <div>
                           <span className="text-lg font-mono font-bold" style={{ color: "var(--accent-amber)" }}>{rate.toFixed(4)}</span>
                         </div>
                         <div className="text-right">
-                          <div className="text-lg font-mono font-bold" style={{ color: "var(--accent-cyan)" }}>
-                            ${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          <div className="text-lg font-mono font-bold" style={{ color: resultColor }}>
+                            {resultLabel}
                           </div>
-                          {idx > 0 && baseUsd > 0 && (
+                          {idx > 0 && baseResult > 0 && (
                             <div className="text-sm font-mono" style={{ color: diff >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                              {diff >= 0 ? "+" : ""}{diff.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} vs first
+                              {diff >= 0 ? "+" : ""}
+                              {compareFromCurrency === "INR"
+                                ? `$${diff.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : compareToCurrency === "INR"
+                                  ? formatINR(diff)
+                                  : `GHS ${diff.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              } vs first
                             </div>
                           )}
                         </div>
@@ -809,22 +946,42 @@ export default function SimulatorPage() {
 
                 {/* Summary comparison */}
                 {compareRates.filter(r => parseFloat(r) > 0).length >= 2 && (() => {
-                  const inr = parseSmartNumber(compareAmount);
+                  const sourceAmount = parseSmartNumber(compareAmount);
                   const validRates = compareRates.map(r => parseFloat(r) || 0).filter(r => r > 0);
                   const minRate = Math.min(...validRates);
                   const maxRate = Math.max(...validRates);
-                  const usdAtMin = inr / minRate;
-                  const usdAtMax = inr / maxRate;
-                  const totalDiff = usdAtMin - usdAtMax;
+
+                  let resultAtMin: number;
+                  let resultAtMax: number;
+                  let totalDiff: number;
+                  let currencySymbol: string;
+                  let diffLabel: string;
+
+                  if (compareFromCurrency === "INR") {
+                    // INR → USD: lower rate = more USD
+                    resultAtMin = sourceAmount / minRate;
+                    resultAtMax = sourceAmount / maxRate;
+                    totalDiff = resultAtMin - resultAtMax;
+                    currencySymbol = "$";
+                    diffLabel = totalDiff >= 0 ? "more at lower rate" : "less at lower rate";
+                  } else {
+                    // USD → INR/GHS: higher rate = more target currency
+                    resultAtMin = sourceAmount * minRate;
+                    resultAtMax = sourceAmount * maxRate;
+                    totalDiff = resultAtMax - resultAtMin;
+                    currencySymbol = compareToCurrency === "INR" ? "₹" : "GHS ";
+                    diffLabel = totalDiff >= 0 ? "more at higher rate" : "less at higher rate";
+                  }
+
                   return (
                     <div className="mt-4 pt-3" style={{ borderTop: "2px solid var(--border)" }}>
                       <div className="text-sm" style={{ color: "var(--text-muted)" }}>
                         Rate range: <strong style={{ color: "var(--text-primary)" }}>{minRate.toFixed(4)} → {maxRate.toFixed(4)}</strong>
                       </div>
                       <div className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
-                        Difference: <strong style={{ color: totalDiff >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                          ${Math.abs(totalDiff).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </strong> {totalDiff >= 0 ? "more" : "less"} at lower rate
+                        Difference: <strong style={{ color: "var(--accent-green)" }}>
+                          {currencySymbol}{Math.abs(totalDiff).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </strong> {diffLabel}
                       </div>
                     </div>
                   );
