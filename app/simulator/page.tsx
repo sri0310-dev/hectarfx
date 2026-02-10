@@ -752,11 +752,11 @@ export default function SimulatorPage() {
 
       {/* Quick Compare Modal */}
       {showCompare && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }}>
-          <div className="w-full max-w-lg rounded-xl p-6" style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}>
+        <div className="fixed inset-0 z-50 flex items-start md:items-center justify-center p-4 overflow-y-auto" style={{ background: "rgba(0,0,0,0.6)" }}>
+          <div className="w-full max-w-lg rounded-xl p-5 my-4 md:my-0" style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>Quick Rate Compare</h2>
-              <button onClick={() => setShowCompare(false)} className="text-2xl leading-none" style={{ color: "var(--text-muted)" }}>&times;</button>
+              <button type="button" onClick={() => setShowCompare(false)} className="text-2xl leading-none" style={{ color: "var(--text-muted)" }}>&times;</button>
             </div>
 
             {/* Currency Direction Selector */}
@@ -766,6 +766,7 @@ export default function SimulatorPage() {
                   <label className="text-xs mb-1 block" style={{ color: "var(--text-muted)" }}>From</label>
                   <div className="flex rounded overflow-hidden" style={{ border: "1px solid var(--border)" }}>
                     <button
+                      type="button"
                       onClick={() => {
                         if (compareFromCurrency !== "INR") {
                           setCompareFromCurrency("INR");
@@ -784,6 +785,7 @@ export default function SimulatorPage() {
                       INR
                     </button>
                     <button
+                      type="button"
                       onClick={() => {
                         if (compareFromCurrency !== "USD") {
                           setCompareFromCurrency("USD");
@@ -811,6 +813,7 @@ export default function SimulatorPage() {
                   <div className="flex rounded overflow-hidden" style={{ border: "1px solid var(--border)" }}>
                     {compareFromCurrency === "INR" ? (
                       <button
+                        type="button"
                         className="flex-1 px-3 py-2 text-sm font-medium"
                         style={{ background: "var(--accent-cyan)", color: "white" }}
                       >
@@ -819,6 +822,7 @@ export default function SimulatorPage() {
                     ) : (
                       <>
                         <button
+                          type="button"
                           onClick={() => {
                             if (compareToCurrency !== "INR") {
                               setCompareToCurrency("INR");
@@ -835,6 +839,7 @@ export default function SimulatorPage() {
                           INR
                         </button>
                         <button
+                          type="button"
                           onClick={() => {
                             if (compareToCurrency !== "GHS") {
                               setCompareToCurrency("GHS");
@@ -921,6 +926,7 @@ export default function SimulatorPage() {
                     />
                     {compareRates.length > 2 && (
                       <button
+                        type="button"
                         onClick={() => setCompareRates(compareRates.filter((_, i) => i !== idx))}
                         className="px-3 rounded"
                         style={{ color: "var(--accent-red)", border: "1px solid var(--border)" }}
@@ -932,6 +938,7 @@ export default function SimulatorPage() {
                 ))}
               </div>
               <button
+                type="button"
                 onClick={() => setCompareRates([...compareRates, ""])}
                 className="text-sm mt-2 px-3 py-1 rounded"
                 style={{ color: "var(--accent-blue)", border: "1px solid var(--accent-blue)" }}
@@ -1060,6 +1067,7 @@ export default function SimulatorPage() {
 
             <div className="flex justify-end gap-2">
               <button
+                type="button"
                 onClick={() => setShowCompare(false)}
                 className="px-4 py-2 rounded-lg text-sm font-medium"
                 style={{ background: "var(--bg-card-hover)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
