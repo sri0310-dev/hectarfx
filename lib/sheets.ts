@@ -5,6 +5,7 @@ import { toNumber, parseDate } from "./fx";
 
 let googleModule: typeof import("googleapis") | null = null;
 
+// Read-only auth for most operations
 async function getGoogleAuth() {
   if (!googleModule) {
     googleModule = await import("googleapis");
@@ -17,6 +18,22 @@ async function getGoogleAuth() {
     email: creds.client_email,
     key: creds.private_key,
     scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+  });
+}
+
+// Read-write auth for sim hedges
+async function getGoogleAuthReadWrite() {
+  if (!googleModule) {
+    googleModule = await import("googleapis");
+  }
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!raw) throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON env var");
+
+  const creds = JSON.parse(raw);
+  return new googleModule.google.auth.JWT({
+    email: creds.client_email,
+    key: creds.private_key,
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
 }
 
@@ -314,4 +331,85 @@ export function getDemoTrades(): Trade[] {
       mtmInr: 122936,
     },
   ];
+}
+
+// ─── Simulation Hedges (shared across org via Google Sheet) ───
+
+export type SheetSimHedge = {
+  id: number;
+  mode: "USD" | "INR";
+  amount: string;
+  rate: string;
+  expiry: string;
+  createdBy?: string;
+  createdAt?: string;
+};
+
+const SIM_HEDGES_RANGE = "SimHedges!A:G";
+
+export async function fetchSimHedgesFromSheet(): Promise<SheetSimHedge[]> {
+  const sheetId = process.env.SHEET_ID;
+  if (!sheetId) return [];
+
+  try {
+    const rows = await readSheetValues(sheetId, SIM_HEDGES_RANGE);
+    if (rows.length < 2) return []; // Header only or empty
+
+    // Skip header row, parse data rows
+    // Columns: ID | Mode | Amount | Rate | Expiry | CreatedBy | CreatedAt
+    return rows.slice(1).map((row) => ({
+      id: parseInt(row[0]) || 0,
+      mode: (row[1] === "USD" ? "USD" : "INR") as "USD" | "INR",
+      amount: row[2] || "",
+      rate: row[3] || "",
+      expiry: row[4] || "",
+      createdBy: row[5] || "",
+      createdAt: row[6] || "",
+    })).filter(h => h.id > 0 && (h.amount || h.rate)); // Filter out empty rows
+  } catch {
+    return [];
+  }
+}
+
+export async function saveSimHedgesToSheet(hedges: SheetSimHedge[]): Promise<boolean> {
+  const sheetId = process.env.SHEET_ID;
+  if (!sheetId) return false;
+
+  try {
+    const auth = await getGoogleAuthReadWrite();
+    const { google } = await import("googleapis");
+    const sheets = google.sheets({ version: "v4", auth });
+
+    // Prepare data with header
+    const header = ["ID", "Mode", "Amount", "Rate", "Expiry", "CreatedBy", "CreatedAt"];
+    const dataRows = hedges.map(h => [
+      h.id.toString(),
+      h.mode,
+      h.amount,
+      h.rate,
+      h.expiry,
+      h.createdBy || "",
+      h.createdAt || new Date().toISOString(),
+    ]);
+
+    // Clear existing data and write new
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: sheetId,
+      range: SIM_HEDGES_RANGE,
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: "SimHedges!A1",
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [header, ...dataRows],
+      },
+    });
+
+    return true;
+  } catch (err) {
+    console.error("Failed to save sim hedges:", err);
+    return false;
+  }
 }

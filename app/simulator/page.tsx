@@ -131,6 +131,7 @@ export default function SimulatorPage() {
   const [activeHedges, setActiveHedges] = useState<ActiveHedge[]>([]);
   const [simHedges, setSimHedges] = useState<SimHedge[]>([]);
   const [simHedgesLoaded, setSimHedgesLoaded] = useState(false);
+  const [simHedgesSaving, setSimHedgesSaving] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectionApplied, setSelectionApplied] = useState(false);
@@ -138,29 +139,53 @@ export default function SimulatorPage() {
   const [filterMonth, setFilterMonth] = useState("");
   const [filterCommodity, setFilterCommodity] = useState("");
 
-  // Load sim hedges from localStorage on mount
-  useEffect(() => {
+  // Fetch sim hedges from Google Sheet API
+  const fetchSimHedges = useCallback(async () => {
     try {
-      const saved = localStorage.getItem("hectarfx-sim-hedges");
-      if (saved) {
-        const parsed = JSON.parse(saved) as SimHedge[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setSimHedges(parsed);
-          // Update counter to avoid ID conflicts
-          const maxId = Math.max(...parsed.map(h => h.id));
+      const res = await fetch("/api/sim-hedges");
+      const data = await res.json();
+      if (data.hedges && Array.isArray(data.hedges)) {
+        setSimHedges(data.hedges);
+        if (data.hedges.length > 0) {
+          const maxId = Math.max(...data.hedges.map((h: SimHedge) => h.id));
           simIdCounter = maxId + 1;
         }
       }
-    } catch { /* ignore parse errors */ }
-    setSimHedgesLoaded(true);
+      setSimHedgesLoaded(true);
+    } catch {
+      setSimHedgesLoaded(true);
+    }
   }, []);
 
-  // Save sim hedges to localStorage whenever they change
+  // Load sim hedges from API on mount
   useEffect(() => {
-    if (simHedgesLoaded) {
-      localStorage.setItem("hectarfx-sim-hedges", JSON.stringify(simHedges));
-    }
-  }, [simHedges, simHedgesLoaded]);
+    fetchSimHedges();
+    // Poll for updates every 30 seconds (for org-wide sync)
+    const pollInterval = setInterval(fetchSimHedges, 30_000);
+    return () => clearInterval(pollInterval);
+  }, [fetchSimHedges]);
+
+  // Save sim hedges to Google Sheet API (debounced)
+  const saveSimHedgesToApi = useCallback(async (hedges: SimHedge[]) => {
+    setSimHedgesSaving(true);
+    try {
+      await fetch("/api/sim-hedges", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hedges }),
+      });
+    } catch { /* silent */ }
+    setSimHedgesSaving(false);
+  }, []);
+
+  // Debounced save when sim hedges change
+  useEffect(() => {
+    if (!simHedgesLoaded) return;
+    const timeout = setTimeout(() => {
+      saveSimHedgesToApi(simHedges);
+    }, 1000); // 1 second debounce
+    return () => clearTimeout(timeout);
+  }, [simHedges, simHedgesLoaded, saveSimHedgesToApi]);
 
   const fetchFx = useCallback(async () => {
     try {
@@ -492,8 +517,13 @@ export default function SimulatorPage() {
           {/* Simulation Hedges */}
           <div className="card py-3 px-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Simulation Hedges</h3>
-              <button onClick={addSimHedge} className="text-xs text-blue-400 hover:text-blue-300 border border-blue-500/30 rounded px-2 py-1 font-medium">+ Add Hedge</button>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Simulation Hedges</h3>
+                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "var(--accent-purple)", color: "white", opacity: simHedgesSaving ? 1 : 0.7 }}>
+                  {simHedgesSaving ? "Saving..." : "Org-wide"}
+                </span>
+              </div>
+              <button type="button" onClick={addSimHedge} className="text-xs text-blue-400 hover:text-blue-300 border border-blue-500/30 rounded px-2 py-1 font-medium">+ Add Hedge</button>
             </div>
             {simHedges.length > 0 ? (
               <div className="space-y-3">
