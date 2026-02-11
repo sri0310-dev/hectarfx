@@ -15,6 +15,7 @@ import {
   Cell,
 } from "recharts";
 import { PnlBadge } from "./components/PnlBadge";
+import EventWatch from "./components/EventWatch";
 
 type Trade = {
   tradeId: string;
@@ -438,6 +439,9 @@ export default function DashboardPage() {
           </BarChart>
         </ResponsiveContainer>
       </div>
+
+      {/* Event Watch - AI-powered economic calendar */}
+      <EventWatch />
 
     </div>
   );
