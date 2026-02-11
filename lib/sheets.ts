@@ -413,3 +413,155 @@ export async function saveSimHedgesToSheet(hedges: SheetSimHedge[]): Promise<boo
     return false;
   }
 }
+
+// ─── Active Hedges (real bank contracts, shared across org) ───
+
+export type SheetActiveHedge = {
+  id: string;
+  ticketNo: string;
+  bank: string;
+  type: "FORWARD" | "OPTION" | "OTHER";
+  direction: "BUY_USD" | "SELL_USD";
+  usdAmount: number;
+  rate: number;
+  inrAmount: number;
+  settlementDate: string;
+  contractDate: string;
+  status: "ACTIVE" | "SETTLED" | "CANCELLED";
+  createdAt: string;
+  notes?: string;
+};
+
+export type SheetAuditEntry = {
+  id: string;
+  timestamp: string;
+  action: "CREATED" | "CANCELLED" | "SETTLED" | "DELETED";
+  hedgeId: string;
+  ticketNo: string;
+  summary: string;
+};
+
+const HEDGES_RANGE = "Hedges!A:M";
+const HEDGE_AUDIT_RANGE = "HedgeAudit!A:F";
+
+export async function fetchHedgesFromSheet(): Promise<{ hedges: SheetActiveHedge[]; audit: SheetAuditEntry[] }> {
+  const sheetId = process.env.SHEET_ID;
+  if (!sheetId) return { hedges: [], audit: [] };
+
+  try {
+    const [hedgeRows, auditRows] = await Promise.all([
+      readSheetValues(sheetId, HEDGES_RANGE),
+      readSheetValues(sheetId, HEDGE_AUDIT_RANGE),
+    ]);
+
+    // Parse hedges (skip header)
+    // Columns: ID | TicketNo | Bank | Type | Direction | USDAmount | Rate | INRAmount | SettlementDate | ContractDate | Status | CreatedAt | Notes
+    const hedges: SheetActiveHedge[] = hedgeRows.length > 1
+      ? hedgeRows.slice(1).map((row) => ({
+          id: row[0] || "",
+          ticketNo: row[1] || "",
+          bank: row[2] || "",
+          type: (row[3] as "FORWARD" | "OPTION" | "OTHER") || "FORWARD",
+          direction: (row[4] as "BUY_USD" | "SELL_USD") || "BUY_USD",
+          usdAmount: parseFloat(row[5]) || 0,
+          rate: parseFloat(row[6]) || 0,
+          inrAmount: parseFloat(row[7]) || 0,
+          settlementDate: row[8] || "",
+          contractDate: row[9] || "",
+          status: (row[10] as "ACTIVE" | "SETTLED" | "CANCELLED") || "ACTIVE",
+          createdAt: row[11] || "",
+          notes: row[12] || "",
+        })).filter(h => h.id && h.usdAmount > 0)
+      : [];
+
+    // Parse audit (skip header)
+    // Columns: ID | Timestamp | Action | HedgeId | TicketNo | Summary
+    const audit: SheetAuditEntry[] = auditRows.length > 1
+      ? auditRows.slice(1).map((row) => ({
+          id: row[0] || "",
+          timestamp: row[1] || "",
+          action: (row[2] as "CREATED" | "CANCELLED" | "SETTLED" | "DELETED") || "CREATED",
+          hedgeId: row[3] || "",
+          ticketNo: row[4] || "",
+          summary: row[5] || "",
+        })).filter(a => a.id)
+      : [];
+
+    return { hedges, audit };
+  } catch {
+    return { hedges: [], audit: [] };
+  }
+}
+
+export async function saveHedgesToSheet(hedges: SheetActiveHedge[], audit: SheetAuditEntry[]): Promise<boolean> {
+  const sheetId = process.env.SHEET_ID;
+  if (!sheetId) return false;
+
+  try {
+    const auth = await getGoogleAuthReadWrite();
+    const { google } = await import("googleapis");
+    const sheets = google.sheets({ version: "v4", auth });
+
+    // Prepare hedges data
+    const hedgeHeader = ["ID", "TicketNo", "Bank", "Type", "Direction", "USDAmount", "Rate", "INRAmount", "SettlementDate", "ContractDate", "Status", "CreatedAt", "Notes"];
+    const hedgeRows = hedges.map(h => [
+      h.id,
+      h.ticketNo,
+      h.bank,
+      h.type,
+      h.direction,
+      h.usdAmount.toString(),
+      h.rate.toString(),
+      h.inrAmount.toString(),
+      h.settlementDate,
+      h.contractDate,
+      h.status,
+      h.createdAt,
+      h.notes || "",
+    ]);
+
+    // Prepare audit data
+    const auditHeader = ["ID", "Timestamp", "Action", "HedgeId", "TicketNo", "Summary"];
+    const auditRows = audit.map(a => [
+      a.id,
+      a.timestamp,
+      a.action,
+      a.hedgeId,
+      a.ticketNo,
+      a.summary,
+    ]);
+
+    // Clear and write hedges
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: sheetId,
+      range: HEDGES_RANGE,
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: "Hedges!A1",
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [hedgeHeader, ...hedgeRows],
+      },
+    });
+
+    // Clear and write audit
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: sheetId,
+      range: HEDGE_AUDIT_RANGE,
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: "HedgeAudit!A1",
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [auditHeader, ...auditRows],
+      },
+    });
+
+    return true;
+  } catch (err) {
+    console.error("Failed to save hedges:", err);
+    return false;
+  }
+}
