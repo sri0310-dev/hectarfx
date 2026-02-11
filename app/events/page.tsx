@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 
 type MarketEvent = {
   id: string;
-  date: string;
+  dateISO: string;
+  dateDisplay: string;
+  daysFromNow: number;
   time?: string;
   event: string;
   category: "fed" | "us_data" | "rbi" | "india_data" | "global" | "oil" | "flows";
@@ -13,7 +15,30 @@ type MarketEvent = {
   typicalBias: "usdinr_up" | "usdinr_down" | "volatile" | "depends";
   biasExplanation: string;
   actionableInsight?: string;
-  daysFromNow: number;
+};
+
+type Prediction = {
+  level: number;
+  change: number;
+  changePct: number;
+};
+
+type Predictions = {
+  currentSpot: number;
+  forward1m: number;
+  forward3m: number;
+  predictions: {
+    "1_day": Prediction;
+    "3_day": Prediction;
+    "1_week": Prediction;
+    "1_month": Prediction;
+  };
+  forwardPoints: { "1m": number; "3m": number };
+  impliedCarryPct: { "1m_annualized": number; "3m_annualized": number };
+  marketBias: string;
+  biasExplanation: string;
+  methodology: string;
+  disclaimer: string;
 };
 
 type MarketContext = {
@@ -27,8 +52,9 @@ type MarketContext = {
 
 export default function EventWatchPage() {
   const [events, setEvents] = useState<MarketEvent[]>([]);
+  const [predictions, setPredictions] = useState<Predictions | null>(null);
   const [marketContext, setMarketContext] = useState<MarketContext | null>(null);
-  const [methodology, setMethodology] = useState("");
+  const [dataSource, setDataSource] = useState("");
   const [loading, setLoading] = useState(true);
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
 
@@ -37,16 +63,15 @@ export default function EventWatchPage() {
       .then((r) => r.json())
       .then((data) => {
         setEvents(data.events || []);
+        setPredictions(data.predictions || null);
         setMarketContext(data.marketContext || null);
-        setMethodology(data.methodology || "");
+        setDataSource(data.dataSource || "");
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, []);
 
-  const getImpactStars = (impact: number) => {
-    return "★".repeat(impact) + "☆".repeat(5 - impact);
-  };
+  const getImpactStars = (impact: number) => "★".repeat(impact) + "☆".repeat(5 - impact);
 
   const getImpactColor = (impact: number) => {
     if (impact >= 5) return "var(--accent-red)";
@@ -70,14 +95,10 @@ export default function EventWatchPage() {
 
   const getBiasIndicator = (bias: string) => {
     switch (bias) {
-      case "usdinr_up":
-        return { icon: "↑", color: "var(--accent-red)", text: "USDINR UP" };
-      case "usdinr_down":
-        return { icon: "↓", color: "var(--accent-green)", text: "USDINR DOWN" };
-      case "volatile":
-        return { icon: "↔", color: "var(--accent-amber)", text: "VOLATILE" };
-      default:
-        return { icon: "?", color: "var(--accent-blue)", text: "DEPENDS" };
+      case "usdinr_up": return { icon: "↑", color: "var(--accent-red)", text: "USDINR UP" };
+      case "usdinr_down": return { icon: "↓", color: "var(--accent-green)", text: "USDINR DOWN" };
+      case "volatile": return { icon: "↔", color: "var(--accent-amber)", text: "VOLATILE" };
+      default: return { icon: "?", color: "var(--accent-blue)", text: "DEPENDS" };
     }
   };
 
@@ -89,28 +110,17 @@ export default function EventWatchPage() {
     return { text: `${days}d`, color: "var(--text-muted)", urgent: false };
   };
 
-  // Separate high-impact (this week) vs coming up
   const thisWeek = events.filter((e) => e.daysFromNow <= 7);
   const comingUp = events.filter((e) => e.daysFromNow > 7);
 
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>
-            Event Watch
-          </h1>
-        </div>
+        <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>Event Watch</h1>
         <div className="card p-6">
           <div className="animate-pulse space-y-4">
             <div className="h-6 bg-gray-700/50 rounded w-1/3"></div>
             <div className="h-32 bg-gray-700/30 rounded"></div>
-            <div className="h-6 bg-gray-700/50 rounded w-1/4"></div>
-            <div className="space-y-3">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="h-24 bg-gray-700/30 rounded"></div>
-              ))}
-            </div>
           </div>
         </div>
       </div>
@@ -122,76 +132,134 @@ export default function EventWatchPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>
-            Event Watch
-          </h1>
-          <span
-            className="text-xs px-2 py-1 rounded font-medium"
-            style={{ background: "var(--accent-purple)", color: "white" }}
-          >
-            USDINR Impact
+          <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>Event Watch</h1>
+          <span className="text-xs px-2 py-1 rounded font-medium" style={{ background: "var(--accent-purple)", color: "white" }}>
+            USDINR Focus
           </span>
         </div>
-        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-          Next 21 days
-        </div>
+        <div className="text-xs" style={{ color: "var(--text-muted)" }}>Next 21 days</div>
       </div>
 
-      {/* Market Context Overview */}
-      {marketContext && (
-        <div className="card p-5">
-          <h2 className="text-sm font-semibold mb-4 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Market Context
-          </h2>
+      {/* USDINR Predictions Card - THE KEY FEATURE */}
+      {predictions && (
+        <div className="card p-5" style={{ border: "2px solid var(--accent-cyan)" }}>
+          <div className="flex items-center gap-2 mb-4">
+            <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+              USDINR Outlook
+            </h2>
+            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "rgba(6, 182, 212, 0.2)", color: "var(--accent-cyan)" }}>
+              LIVE FROM FORWARD CURVE
+            </span>
+          </div>
 
-          {/* Quick Take */}
-          <div
-            className="p-4 rounded-lg mb-4"
-            style={{ background: "rgba(59, 130, 246, 0.1)", border: "1px solid rgba(59, 130, 246, 0.2)" }}
-          >
-            <div className="text-xs font-medium mb-1" style={{ color: "var(--accent-blue)" }}>
-              QUICK TAKE
+          {/* Current Spot */}
+          <div className="flex items-baseline gap-3 mb-4">
+            <span className="text-3xl font-bold" style={{ color: "var(--accent-cyan)" }}>
+              {predictions.currentSpot.toFixed(4)}
+            </span>
+            <span className="text-sm" style={{ color: "var(--text-muted)" }}>Current Spot</span>
+          </div>
+
+          {/* Predictions Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            {[
+              { label: "1 Day", data: predictions.predictions["1_day"] },
+              { label: "3 Days", data: predictions.predictions["3_day"] },
+              { label: "1 Week", data: predictions.predictions["1_week"] },
+              { label: "1 Month", data: predictions.predictions["1_month"] },
+            ].map(({ label, data }) => (
+              <div key={label} className="p-3 rounded-lg" style={{ background: "var(--bg-card-hover)", border: "1px solid var(--border)" }}>
+                <div className="text-[10px] mb-1" style={{ color: "var(--text-muted)" }}>{label}</div>
+                <div className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>
+                  {data.level.toFixed(4)}
+                </div>
+                <div className="text-xs" style={{ color: data.change >= 0 ? "var(--accent-red)" : "var(--accent-green)" }}>
+                  {data.change >= 0 ? "+" : ""}{data.change.toFixed(4)} ({data.changePct >= 0 ? "+" : ""}{data.changePct.toFixed(3)}%)
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Market Bias */}
+          <div className="p-3 rounded-lg mb-3" style={{
+            background: predictions.marketBias === "usdinr_up"
+              ? "rgba(239, 68, 68, 0.1)"
+              : predictions.marketBias === "usdinr_down"
+              ? "rgba(34, 197, 94, 0.1)"
+              : "rgba(59, 130, 246, 0.1)",
+            border: `1px solid ${predictions.marketBias === "usdinr_up" ? "rgba(239, 68, 68, 0.3)" : predictions.marketBias === "usdinr_down" ? "rgba(34, 197, 94, 0.3)" : "rgba(59, 130, 246, 0.3)"}`
+          }}>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xl">{predictions.marketBias === "usdinr_up" ? "↑" : predictions.marketBias === "usdinr_down" ? "↓" : "→"}</span>
+              <span className="font-semibold" style={{
+                color: predictions.marketBias === "usdinr_up" ? "var(--accent-red)" : predictions.marketBias === "usdinr_down" ? "var(--accent-green)" : "var(--accent-blue)"
+              }}>
+                {predictions.marketBias === "usdinr_up" ? "Bias: USDINR UP (INR Weaker)" : predictions.marketBias === "usdinr_down" ? "Bias: USDINR DOWN (INR Stronger)" : "Bias: NEUTRAL"}
+              </span>
             </div>
             <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              {marketContext.quickTake}
+              {predictions.biasExplanation}
             </div>
           </div>
 
-          {/* Key Drivers Grid */}
+          {/* Forward Points */}
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div className="text-xs">
+              <span style={{ color: "var(--text-muted)" }}>1M Forward Points: </span>
+              <span style={{ color: "var(--text-primary)" }}>{predictions.forwardPoints["1m"] >= 0 ? "+" : ""}{predictions.forwardPoints["1m"].toFixed(4)}</span>
+            </div>
+            <div className="text-xs">
+              <span style={{ color: "var(--text-muted)" }}>3M Forward Points: </span>
+              <span style={{ color: "var(--text-primary)" }}>{predictions.forwardPoints["3m"] >= 0 ? "+" : ""}{predictions.forwardPoints["3m"].toFixed(4)}</span>
+            </div>
+            <div className="text-xs">
+              <span style={{ color: "var(--text-muted)" }}>1M Carry (Ann.): </span>
+              <span style={{ color: "var(--text-primary)" }}>{predictions.impliedCarryPct["1m_annualized"].toFixed(2)}%</span>
+            </div>
+            <div className="text-xs">
+              <span style={{ color: "var(--text-muted)" }}>3M Carry (Ann.): </span>
+              <span style={{ color: "var(--text-primary)" }}>{predictions.impliedCarryPct["3m_annualized"].toFixed(2)}%</span>
+            </div>
+          </div>
+
+          {/* Methodology & Disclaimer */}
+          <div className="text-[10px] p-2 rounded" style={{ background: "var(--bg-card)", color: "var(--text-muted)" }}>
+            <strong>Methodology:</strong> {predictions.methodology}
+            <br />
+            <strong>Disclaimer:</strong> {predictions.disclaimer}
+          </div>
+        </div>
+      )}
+
+      {/* Market Context */}
+      {marketContext && (
+        <div className="card p-5">
+          <h2 className="text-sm font-semibold mb-4" style={{ color: "var(--text-primary)" }}>Market Context</h2>
+
+          <div className="p-3 rounded-lg mb-4" style={{ background: "rgba(59, 130, 246, 0.1)", border: "1px solid rgba(59, 130, 246, 0.2)" }}>
+            <div className="text-xs font-medium mb-1" style={{ color: "var(--accent-blue)" }}>QUICK TAKE</div>
+            <div className="text-sm" style={{ color: "var(--text-secondary)" }}>{marketContext.quickTake}</div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
             {marketContext.keyDrivers.map((driver, idx) => (
-              <div
-                key={idx}
-                className="p-3 rounded-lg"
-                style={{ background: "var(--bg-card-hover)", border: "1px solid var(--border)" }}
-              >
-                <div className="text-xs font-semibold mb-1" style={{ color: "var(--text-primary)" }}>
-                  {driver.driver}
-                </div>
-                <div className="text-xs mb-2" style={{ color: "var(--text-muted)" }}>
-                  {driver.currentStance}
-                </div>
-                <div className="text-xs" style={{ color: "var(--accent-amber)" }}>
-                  {driver.impactOnUsdinr}
-                </div>
+              <div key={idx} className="p-3 rounded-lg" style={{ background: "var(--bg-card-hover)", border: "1px solid var(--border)" }}>
+                <div className="text-xs font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{driver.driver}</div>
+                <div className="text-xs mb-2" style={{ color: "var(--text-muted)" }}>{driver.currentStance}</div>
+                <div className="text-xs" style={{ color: "var(--accent-amber)" }}>{driver.impactOnUsdinr}</div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* This Week - High Priority */}
+      {/* This Week Events */}
       {thisWeek.length > 0 && (
         <div className="card p-5">
           <h2 className="text-sm font-semibold mb-4 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
             This Week
-            <span className="text-xs font-normal ml-2" style={{ color: "var(--text-muted)" }}>
-              {thisWeek.length} event{thisWeek.length !== 1 ? "s" : ""}
-            </span>
+            <span className="text-xs font-normal ml-2" style={{ color: "var(--text-muted)" }}>{thisWeek.length} event{thisWeek.length !== 1 ? "s" : ""}</span>
           </h2>
 
           <div className="space-y-3">
@@ -208,103 +276,59 @@ export default function EventWatchPage() {
                   style={{ background: "var(--bg-card-hover)", border: "1px solid var(--border)" }}
                   onClick={() => setExpandedEvent(isExpanded ? null : event.id)}
                 >
-                  {/* Main Row */}
                   <div className="p-4">
                     <div className="flex items-start justify-between gap-4">
-                      {/* Left: Date & Event */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <span
-                            className="text-xs font-bold px-1.5 py-0.5 rounded"
-                            style={{ background: daysLabel.urgent ? "rgba(239, 68, 68, 0.2)" : "var(--bg-card)", color: daysLabel.color }}
-                          >
+                          <span className="text-xs font-bold px-1.5 py-0.5 rounded" style={{ background: daysLabel.urgent ? "rgba(239, 68, 68, 0.2)" : "var(--bg-card)", color: daysLabel.color }}>
                             {daysLabel.text}
                           </span>
                           <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-                            {event.date}
-                            {event.time && ` • ${event.time}`}
+                            {event.dateDisplay}{event.time && ` • ${event.time}`}
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span
-                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                            style={{ background: category.bg, color: category.color }}
-                          >
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: category.bg, color: category.color }}>
                             {category.label}
                           </span>
-                          <span className="text-sm font-semibold truncate" style={{ color: "var(--text-primary)" }}>
-                            {event.event}
-                          </span>
+                          <span className="text-sm font-semibold truncate" style={{ color: "var(--text-primary)" }}>{event.event}</span>
                         </div>
                       </div>
-
-                      {/* Right: Impact & Bias */}
                       <div className="flex items-center gap-4 flex-shrink-0">
                         <div className="text-right">
-                          <div className="text-[10px] mb-0.5" style={{ color: "var(--text-muted)" }}>
-                            IMPACT
-                          </div>
-                          <div className="text-xs tracking-wider" style={{ color: getImpactColor(event.impact) }}>
-                            {getImpactStars(event.impact)}
-                          </div>
+                          <div className="text-[10px] mb-0.5" style={{ color: "var(--text-muted)" }}>IMPACT</div>
+                          <div className="text-xs tracking-wider" style={{ color: getImpactColor(event.impact) }}>{getImpactStars(event.impact)}</div>
                         </div>
                         <div className="text-right">
-                          <div className="text-[10px] mb-0.5" style={{ color: "var(--text-muted)" }}>
-                            TYPICAL
-                          </div>
+                          <div className="text-[10px] mb-0.5" style={{ color: "var(--text-muted)" }}>TYPICAL</div>
                           <div className="text-xs font-semibold flex items-center gap-1" style={{ color: bias.color }}>
                             <span className="text-base">{bias.icon}</span>
                             <span className="hidden sm:inline">{bias.text}</span>
                           </div>
                         </div>
-                        <svg
-                          className={`w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                          style={{ color: "var(--text-muted)" }}
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
+                        <svg className={`w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""}`} style={{ color: "var(--text-muted)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
                       </div>
                     </div>
                   </div>
 
-                  {/* Expanded Details */}
                   {isExpanded && (
-                    <div
-                      className="px-4 pb-4 pt-0 border-t"
-                      style={{ borderColor: "var(--border)" }}
-                    >
+                    <div className="px-4 pb-4 pt-0 border-t" style={{ borderColor: "var(--border)" }}>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                         <div>
-                          <div className="text-[10px] font-semibold mb-1" style={{ color: "var(--accent-blue)" }}>
-                            WHY IT MATTERS
-                          </div>
-                          <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                            {event.whyItMatters}
-                          </div>
+                          <div className="text-[10px] font-semibold mb-1" style={{ color: "var(--accent-blue)" }}>WHY IT MATTERS</div>
+                          <div className="text-sm" style={{ color: "var(--text-secondary)" }}>{event.whyItMatters}</div>
                         </div>
                         <div>
-                          <div className="text-[10px] font-semibold mb-1" style={{ color: "var(--accent-amber)" }}>
-                            BIAS EXPLANATION
-                          </div>
-                          <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                            {event.biasExplanation}
-                          </div>
+                          <div className="text-[10px] font-semibold mb-1" style={{ color: "var(--accent-amber)" }}>BIAS EXPLANATION</div>
+                          <div className="text-sm" style={{ color: "var(--text-secondary)" }}>{event.biasExplanation}</div>
                         </div>
                       </div>
                       {event.actionableInsight && (
-                        <div
-                          className="mt-4 p-3 rounded-lg"
-                          style={{ background: "rgba(34, 197, 94, 0.1)", border: "1px solid rgba(34, 197, 94, 0.2)" }}
-                        >
-                          <div className="text-[10px] font-semibold mb-1" style={{ color: "var(--accent-green)" }}>
-                            ACTIONABLE INSIGHT
-                          </div>
-                          <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                            {event.actionableInsight}
-                          </div>
+                        <div className="mt-4 p-3 rounded-lg" style={{ background: "rgba(34, 197, 94, 0.1)", border: "1px solid rgba(34, 197, 94, 0.2)" }}>
+                          <div className="text-[10px] font-semibold mb-1" style={{ color: "var(--accent-green)" }}>ACTIONABLE INSIGHT</div>
+                          <div className="text-sm" style={{ color: "var(--text-secondary)" }}>{event.actionableInsight}</div>
                         </div>
                       )}
                     </div>
@@ -324,9 +348,7 @@ export default function EventWatchPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
             Coming Up
-            <span className="text-xs font-normal ml-2" style={{ color: "var(--text-muted)" }}>
-              {comingUp.length} event{comingUp.length !== 1 ? "s" : ""}
-            </span>
+            <span className="text-xs font-normal ml-2" style={{ color: "var(--text-muted)" }}>{comingUp.length} event{comingUp.length !== 1 ? "s" : ""}</span>
           </h2>
 
           <div className="space-y-2">
@@ -336,35 +358,15 @@ export default function EventWatchPage() {
               const daysLabel = getDaysLabel(event.daysFromNow);
 
               return (
-                <div
-                  key={event.id}
-                  className="flex items-center justify-between gap-4 p-3 rounded-lg"
-                  style={{ background: "var(--bg-card-hover)", border: "1px solid var(--border)" }}
-                >
+                <div key={event.id} className="flex items-center justify-between gap-4 p-3 rounded-lg" style={{ background: "var(--bg-card-hover)", border: "1px solid var(--border)" }}>
                   <div className="flex items-center gap-3 min-w-0">
-                    <span
-                      className="text-xs font-medium px-1.5 py-0.5 rounded flex-shrink-0"
-                      style={{ background: "var(--bg-card)", color: daysLabel.color }}
-                    >
-                      {daysLabel.text}
-                    </span>
-                    <span
-                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
-                      style={{ background: category.bg, color: category.color }}
-                    >
-                      {category.label}
-                    </span>
-                    <span className="text-sm truncate" style={{ color: "var(--text-primary)" }}>
-                      {event.event}
-                    </span>
+                    <span className="text-xs font-medium px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "var(--bg-card)", color: daysLabel.color }}>{daysLabel.text}</span>
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: category.bg, color: category.color }}>{category.label}</span>
+                    <span className="text-sm truncate" style={{ color: "var(--text-primary)" }}>{event.event}</span>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
-                    <span className="text-xs tracking-wider hidden sm:block" style={{ color: getImpactColor(event.impact) }}>
-                      {getImpactStars(event.impact)}
-                    </span>
-                    <span className="text-sm font-semibold" style={{ color: bias.color }}>
-                      {bias.icon}
-                    </span>
+                    <span className="text-xs tracking-wider hidden sm:block" style={{ color: getImpactColor(event.impact) }}>{getImpactStars(event.impact)}</span>
+                    <span className="text-sm font-semibold" style={{ color: bias.color }}>{bias.icon}</span>
                   </div>
                 </div>
               );
@@ -373,30 +375,23 @@ export default function EventWatchPage() {
         </div>
       )}
 
-      {/* No Events */}
       {events.length === 0 && (
         <div className="card p-8 text-center">
-          <div className="text-lg mb-2" style={{ color: "var(--text-primary)" }}>
-            No upcoming events
-          </div>
-          <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-            Check back later for USDINR-moving events
-          </div>
+          <div className="text-lg mb-2" style={{ color: "var(--text-primary)" }}>No upcoming events</div>
+          <div className="text-sm" style={{ color: "var(--text-muted)" }}>Check back later for USDINR-moving events</div>
         </div>
       )}
 
-      {/* Methodology Footer */}
-      {methodology && (
+      {/* Data Source */}
+      {dataSource && (
         <div className="text-xs p-3 rounded-lg" style={{ background: "var(--bg-card)", color: "var(--text-muted)" }}>
-          <strong>Methodology:</strong> {methodology}
+          <strong>Data Source:</strong> {dataSource}
         </div>
       )}
 
       {/* Legend */}
       <div className="card p-4">
-        <div className="text-xs font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
-          Understanding the Signals
-        </div>
+        <div className="text-xs font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Understanding the Signals</div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
           <div>
             <div className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Impact Rating</div>
@@ -417,10 +412,10 @@ export default function EventWatchPage() {
             <div><span className="text-orange-400">RBI/INDIA</span> = India Central Bank/Data</div>
           </div>
           <div>
-            <div className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Timing</div>
-            <div><span className="text-red-400">TODAY/TOMORROW</span> = Urgent</div>
-            <div><span className="text-amber-400">2-7d</span> = This week</div>
-            <div style={{ color: "var(--text-muted)" }}>8d+ = Coming up</div>
+            <div className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Predictions</div>
+            <div>Based on forward curve</div>
+            <div>Positive carry = INR depreciation expected</div>
+            <div>Event risk can override!</div>
           </div>
         </div>
       </div>

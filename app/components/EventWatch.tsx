@@ -5,13 +5,14 @@ import Link from "next/link";
 
 type MarketEvent = {
   id: string;
-  date: string;
+  dateISO: string;
+  dateDisplay: string;
+  daysFromNow: number;
   time?: string;
   event: string;
   category: "fed" | "us_data" | "rbi" | "india_data" | "global" | "oil" | "flows";
   impact: 1 | 2 | 3 | 4 | 5;
   typicalBias: "usdinr_up" | "usdinr_down" | "volatile" | "depends";
-  daysFromNow: number;
 };
 
 export default function EventWatch() {
