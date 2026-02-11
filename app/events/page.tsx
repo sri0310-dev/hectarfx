@@ -15,6 +15,15 @@ type MarketEvent = {
   typicalBias: "usdinr_up" | "usdinr_down" | "volatile" | "depends";
   biasExplanation: string;
   actionableInsight?: string;
+  actual?: string;
+  forecast?: string;
+  previous?: string;
+  isLive?: boolean;
+};
+
+type SetupInstructions = {
+  message: string;
+  steps: string[];
 };
 
 type Prediction = {
@@ -55,6 +64,8 @@ export default function EventWatchPage() {
   const [predictions, setPredictions] = useState<Predictions | null>(null);
   const [marketContext, setMarketContext] = useState<MarketContext | null>(null);
   const [dataSource, setDataSource] = useState("");
+  const [isLive, setIsLive] = useState(false);
+  const [setupInstructions, setSetupInstructions] = useState<SetupInstructions | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
 
@@ -66,6 +77,8 @@ export default function EventWatchPage() {
         setPredictions(data.predictions || null);
         setMarketContext(data.marketContext || null);
         setDataSource(data.dataSource || "");
+        setIsLive(data.isLive || false);
+        setSetupInstructions(data.setupInstructions || null);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -136,9 +149,37 @@ export default function EventWatchPage() {
           <span className="text-xs px-2 py-1 rounded font-medium" style={{ background: "var(--accent-purple)", color: "white" }}>
             USDINR Focus
           </span>
+          {isLive && (
+            <span className="text-xs px-2 py-1 rounded font-medium flex items-center gap-1" style={{ background: "rgba(34, 197, 94, 0.2)", color: "var(--accent-green)" }}>
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+              LIVE
+            </span>
+          )}
         </div>
-        <div className="text-xs" style={{ color: "var(--text-muted)" }}>Next 21 days</div>
+        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+          {dataSource && <span>{dataSource} • </span>}Next 21 days
+        </div>
       </div>
+
+      {/* Setup Instructions (if no API key) */}
+      {setupInstructions && (
+        <div className="card p-4" style={{ background: "rgba(251, 191, 36, 0.1)", border: "1px solid rgba(251, 191, 36, 0.3)" }}>
+          <div className="flex items-start gap-3">
+            <div className="text-2xl">⚙️</div>
+            <div className="flex-1">
+              <div className="font-semibold mb-1" style={{ color: "var(--accent-amber)" }}>{setupInstructions.message}</div>
+              <div className="text-sm space-y-1" style={{ color: "var(--text-secondary)" }}>
+                {setupInstructions.steps.map((step, i) => (
+                  <div key={i}>{step}</div>
+                ))}
+              </div>
+              <div className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>
+                Currently showing estimated dates. With API key, you&apos;ll get exact event times, actual/forecast values, and more events.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* USDINR Predictions Card - THE KEY FEATURE */}
       {predictions && (
@@ -286,6 +327,12 @@ export default function EventWatchPage() {
                           <span className="text-xs" style={{ color: "var(--text-muted)" }}>
                             {event.dateDisplay}{event.time && ` • ${event.time}`}
                           </span>
+                          {event.isLive && (
+                            <span className="text-[9px] px-1 py-0.5 rounded" style={{ background: "rgba(34, 197, 94, 0.2)", color: "var(--accent-green)" }}>LIVE</span>
+                          )}
+                          {!event.isLive && (
+                            <span className="text-[9px] px-1 py-0.5 rounded" style={{ background: "var(--bg-card)", color: "var(--text-muted)" }}>EST</span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: category.bg, color: category.color }}>
@@ -315,6 +362,29 @@ export default function EventWatchPage() {
 
                   {isExpanded && (
                     <div className="px-4 pb-4 pt-0 border-t" style={{ borderColor: "var(--border)" }}>
+                      {/* Live data: Actual/Forecast/Previous */}
+                      {(event.actual || event.forecast || event.previous) && (
+                        <div className="grid grid-cols-3 gap-3 mt-4 mb-4">
+                          {event.actual && (
+                            <div className="p-2 rounded text-center" style={{ background: "rgba(34, 197, 94, 0.1)", border: "1px solid rgba(34, 197, 94, 0.2)" }}>
+                              <div className="text-[10px] mb-1" style={{ color: "var(--text-muted)" }}>ACTUAL</div>
+                              <div className="font-bold" style={{ color: "var(--accent-green)" }}>{event.actual}</div>
+                            </div>
+                          )}
+                          {event.forecast && (
+                            <div className="p-2 rounded text-center" style={{ background: "rgba(59, 130, 246, 0.1)", border: "1px solid rgba(59, 130, 246, 0.2)" }}>
+                              <div className="text-[10px] mb-1" style={{ color: "var(--text-muted)" }}>FORECAST</div>
+                              <div className="font-bold" style={{ color: "var(--accent-blue)" }}>{event.forecast}</div>
+                            </div>
+                          )}
+                          {event.previous && (
+                            <div className="p-2 rounded text-center" style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}>
+                              <div className="text-[10px] mb-1" style={{ color: "var(--text-muted)" }}>PREVIOUS</div>
+                              <div className="font-bold" style={{ color: "var(--text-secondary)" }}>{event.previous}</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                         <div>
                           <div className="text-[10px] font-semibold mb-1" style={{ color: "var(--accent-blue)" }}>WHY IT MATTERS</div>
