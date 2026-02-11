@@ -130,12 +130,37 @@ export default function SimulatorPage() {
 
   const [activeHedges, setActiveHedges] = useState<ActiveHedge[]>([]);
   const [simHedges, setSimHedges] = useState<SimHedge[]>([]);
+  const [simHedgesLoaded, setSimHedgesLoaded] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectionApplied, setSelectionApplied] = useState(false);
   const [selectBy, setSelectBy] = useState<"manual" | "month" | "commodity">("manual");
   const [filterMonth, setFilterMonth] = useState("");
   const [filterCommodity, setFilterCommodity] = useState("");
+
+  // Load sim hedges from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("hectarfx-sim-hedges");
+      if (saved) {
+        const parsed = JSON.parse(saved) as SimHedge[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setSimHedges(parsed);
+          // Update counter to avoid ID conflicts
+          const maxId = Math.max(...parsed.map(h => h.id));
+          simIdCounter = maxId + 1;
+        }
+      }
+    } catch { /* ignore parse errors */ }
+    setSimHedgesLoaded(true);
+  }, []);
+
+  // Save sim hedges to localStorage whenever they change
+  useEffect(() => {
+    if (simHedgesLoaded) {
+      localStorage.setItem("hectarfx-sim-hedges", JSON.stringify(simHedges));
+    }
+  }, [simHedges, simHedgesLoaded]);
 
   const fetchFx = useCallback(async () => {
     try {
