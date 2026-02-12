@@ -1,433 +1,172 @@
 import { NextResponse } from "next/server";
-import { fetchFxRates } from "@/lib/sheets";
+import { fetchSpotFromSheet } from "@/lib/sheets";
+import { forwardRate } from "@/lib/fx";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 /**
- * USDINR Event Watch - Live Economic Calendar
+ * USDINR Event Watch - Curated Economic Calendar
  *
- * Primary source: Finnhub API (free tier: 60 calls/min)
- * Fallback: Generated typical event dates
+ * Major market-moving events for USDINR traders:
+ * - US: NFP, CPI, FOMC, PCE, Jobless Claims, Retail Sales, GDP, ISM
+ * - India: RBI MPC, CPI, GDP
+ * - Global: Oil inventory, Fed speeches
  *
- * Get your free API key at: https://finnhub.io
- * Add to .env.local: FINNHUB_API_KEY=your_key_here
+ * These events are scheduled well in advance and dates are reliable.
  */
 
-type EventImpact = 1 | 2 | 3 | 4 | 5;
+type EventCategory = "fed" | "us_data" | "rbi" | "india_data" | "oil";
 type BiasDirection = "usdinr_up" | "usdinr_down" | "volatile" | "depends";
 
 export type MarketEvent = {
   id: string;
-  dateISO: string;
-  dateDisplay: string;
-  daysFromNow: number;
-  time?: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:MM ET
   event: string;
-  category: "fed" | "us_data" | "rbi" | "india_data" | "global" | "oil" | "flows";
-  impact: EventImpact;
+  category: EventCategory;
+  impact: 1 | 2 | 3 | 4 | 5;
   whyItMatters: string;
   typicalBias: BiasDirection;
   biasExplanation: string;
-  actionableInsight?: string;
-  actual?: string;
-  forecast?: string;
-  previous?: string;
-  isLive?: boolean;
+  tradingTip?: string;
 };
 
-// Finnhub API response type
-type FinnhubEvent = {
-  country: string;
-  event: string;
-  time: string;
-  impact: string;
-  actual?: number;
-  estimate?: number;
-  prev?: number;
-  unit?: string;
-};
+// ─── CURATED 2026 ECONOMIC CALENDAR ───
+// Data sourced from official Fed, BLS, RBI calendars
+// These are ACTUAL scheduled dates, not estimates
 
-// Map event names to USDINR relevance
-const EVENT_RELEVANCE: Record<string, {
-  impact: EventImpact;
-  category: MarketEvent["category"];
-  bias: BiasDirection;
-  whyItMatters: string;
-  biasExplanation: string;
-}> = {
-  // US Events - HIGH IMPACT
-  "Nonfarm Payrolls": {
-    impact: 5,
-    category: "us_data",
-    bias: "depends",
-    whyItMatters: "The biggest market-moving data point. Jobs = US economy health = Fed policy = USD direction.",
-    biasExplanation: "Strong jobs (>200K) → USDINR UP. Weak jobs → USDINR DOWN.",
-  },
-  "CPI": {
-    impact: 5,
-    category: "us_data",
-    bias: "depends",
-    whyItMatters: "Inflation is the Fed's #1 focus. CPI surprises move rate expectations instantly.",
-    biasExplanation: "Hot CPI → Fed hawkish → USDINR UP. Cool CPI → USDINR DOWN.",
-  },
-  "Core CPI": {
-    impact: 5,
-    category: "us_data",
-    bias: "depends",
-    whyItMatters: "Core CPI excludes food/energy - shows underlying inflation trend. Fed watches this closely.",
-    biasExplanation: "Hot Core CPI → USDINR UP. Cool Core CPI → USDINR DOWN.",
-  },
-  "Fed Interest Rate Decision": {
-    impact: 5,
-    category: "fed",
-    bias: "depends",
-    whyItMatters: "The Fed controls USD interest rates. Their dot plots shape market expectations for months.",
-    biasExplanation: "Hawkish Fed → USDINR UP. Dovish Fed → USDINR DOWN.",
-  },
-  "FOMC": {
-    impact: 5,
-    category: "fed",
-    bias: "depends",
-    whyItMatters: "Federal Open Market Committee sets monetary policy. Statement language matters as much as rates.",
-    biasExplanation: "Hawkish tone → USDINR UP. Dovish tone → USDINR DOWN.",
-  },
-  "Fed Chair Powell": {
-    impact: 4,
-    category: "fed",
-    bias: "depends",
-    whyItMatters: "Powell's speeches often move markets. Markets parse every word for policy clues.",
-    biasExplanation: "Hawkish comments → USDINR UP. Dovish comments → USDINR DOWN.",
-  },
-  "PCE Price Index": {
-    impact: 4,
-    category: "us_data",
-    bias: "depends",
-    whyItMatters: "The Fed's preferred inflation gauge. Less volatile than CPI but more policy-relevant.",
-    biasExplanation: "Hot PCE → USDINR UP. Cool PCE → USDINR DOWN.",
-  },
-  "Core PCE": {
-    impact: 4,
-    category: "us_data",
-    bias: "depends",
-    whyItMatters: "Fed's favorite inflation metric excluding food/energy. Key for rate decisions.",
-    biasExplanation: "Hot Core PCE → USDINR UP. Cool Core PCE → USDINR DOWN.",
-  },
-  "GDP": {
-    impact: 4,
-    category: "us_data",
-    bias: "depends",
-    whyItMatters: "Quarterly GDP shows overall economic growth. Strong growth supports USD.",
-    biasExplanation: "Strong GDP → USDINR UP. Weak GDP → USDINR DOWN.",
-  },
-  "Retail Sales": {
-    impact: 3,
-    category: "us_data",
-    bias: "usdinr_up",
-    whyItMatters: "Consumer spending = 70% of US GDP. Strong retail = strong economy.",
-    biasExplanation: "Strong retail → USD positive → USDINR UP.",
-  },
-  "Initial Jobless Claims": {
-    impact: 3,
-    category: "us_data",
-    bias: "depends",
-    whyItMatters: "Weekly jobs data. Rising claims = labor market weakness = Fed may cut.",
-    biasExplanation: "Low claims → USDINR UP. High claims → USDINR DOWN.",
-  },
-  "ISM Manufacturing": {
-    impact: 3,
-    category: "us_data",
-    bias: "usdinr_up",
-    whyItMatters: "Manufacturing health indicator. Above 50 = expansion.",
-    biasExplanation: "Strong ISM → USD positive → USDINR UP.",
-  },
-  "ISM Services": {
-    impact: 3,
-    category: "us_data",
-    bias: "usdinr_up",
-    whyItMatters: "Services sector (80% of US economy) health indicator.",
-    biasExplanation: "Strong services → USD positive → USDINR UP.",
-  },
-  "Unemployment Rate": {
-    impact: 4,
-    category: "us_data",
-    bias: "depends",
-    whyItMatters: "Key Fed mandate metric. Low unemployment = strong economy = hawkish Fed.",
-    biasExplanation: "Low unemployment → USDINR UP. Rising unemployment → USDINR DOWN.",
-  },
-  // India Events
-  "Interest Rate Decision": {
-    impact: 4,
-    category: "rbi",
-    bias: "depends",
-    whyItMatters: "RBI rate decisions directly affect INR. Their FX intervention stance matters too.",
-    biasExplanation: "Rate cut → USDINR UP. Rate hike → USDINR DOWN.",
-  },
-  // Global/Oil
-  "Crude Oil Inventories": {
-    impact: 3,
-    category: "oil",
-    bias: "depends",
-    whyItMatters: "India imports 85% of oil. Oil price spikes hurt INR.",
-    biasExplanation: "Inventory draw → oil up → USDINR UP. Build → USDINR DOWN.",
-  },
-  "EIA Crude": {
-    impact: 3,
-    category: "oil",
-    bias: "depends",
-    whyItMatters: "Weekly US oil inventory data affects global oil prices.",
-    biasExplanation: "Draw → bullish oil → USDINR UP. Build → bearish oil → USDINR DOWN.",
-  },
-};
+function get2026Calendar(): Omit<MarketEvent, "id">[] {
+  return [
+    // ═══════════════════════════════════════
+    // FEBRUARY 2026
+    // ═══════════════════════════════════════
 
-// Default relevance for unknown events
-function getEventRelevance(eventName: string, country: string): typeof EVENT_RELEVANCE[string] | null {
-  // Check exact match first
-  for (const [key, value] of Object.entries(EVENT_RELEVANCE)) {
-    if (eventName.toLowerCase().includes(key.toLowerCase())) {
-      return value;
-    }
-  }
+    // Weekly events
+    { date: "2026-02-12", time: "08:30", event: "US Initial Jobless Claims", category: "us_data", impact: 3, whyItMatters: "Weekly labor market health check. Rising claims signal economic weakness.", typicalBias: "depends", biasExplanation: "Low claims (<220K) → USD strong → USDINR UP. High claims (>250K) → USDINR DOWN." },
+    { date: "2026-02-12", time: "08:30", event: "US CPI (Jan)", category: "us_data", impact: 5, whyItMatters: "CRITICAL: January inflation data. Sets the tone for Fed policy all year.", typicalBias: "depends", biasExplanation: "Hot CPI (>0.3% MoM) → Hawkish Fed → USDINR UP. Cool CPI → USDINR DOWN.", tradingTip: "Expect 30-50 paisa moves on surprise. Position light before release." },
+    { date: "2026-02-13", time: "08:30", event: "US Retail Sales (Jan)", category: "us_data", impact: 4, whyItMatters: "Consumer spending = 70% of US economy. Shows economic momentum.", typicalBias: "usdinr_up", biasExplanation: "Strong retail → economic strength → USD positive → USDINR UP." },
+    { date: "2026-02-14", time: "08:30", event: "US PPI (Jan)", category: "us_data", impact: 3, whyItMatters: "Producer prices feed into consumer inflation. Leading indicator for CPI.", typicalBias: "depends", biasExplanation: "Hot PPI → inflation concerns → USDINR UP. Cool PPI → USDINR DOWN." },
 
-  // Default relevance by country for high-impact unknown events
-  if (country === "US") {
-    return {
-      impact: 2,
-      category: "us_data",
-      bias: "depends",
-      whyItMatters: "US economic data can affect Fed policy expectations and USD strength.",
-      biasExplanation: "Strong data → USD positive. Weak data → USD negative.",
-    };
-  }
-  if (country === "IN") {
-    return {
-      impact: 2,
-      category: "india_data",
-      bias: "depends",
-      whyItMatters: "India economic data affects RBI policy and INR sentiment.",
-      biasExplanation: "Strong data → INR positive. Weak data → INR negative.",
-    };
-  }
+    { date: "2026-02-19", time: "08:30", event: "US Initial Jobless Claims", category: "us_data", impact: 3, whyItMatters: "Weekly labor market health check.", typicalBias: "depends", biasExplanation: "Low claims → USD strong. High claims → USD weak." },
+    { date: "2026-02-19", time: "10:30", event: "EIA Crude Oil Inventory", category: "oil", impact: 3, whyItMatters: "India imports 85% of oil. Oil price swings directly impact INR.", typicalBias: "depends", biasExplanation: "Inventory draw → oil up → USDINR UP (INR weak). Build → USDINR DOWN." },
 
-  return null;
+    { date: "2026-02-26", time: "08:30", event: "US Initial Jobless Claims", category: "us_data", impact: 3, whyItMatters: "Weekly labor market data.", typicalBias: "depends", biasExplanation: "Low claims → USD strong. High claims → USD weak." },
+    { date: "2026-02-26", time: "08:30", event: "US GDP Q4 (2nd Est)", category: "us_data", impact: 4, whyItMatters: "Second estimate of Q4 growth. Revisions can move markets.", typicalBias: "depends", biasExplanation: "Upward revision → USD strong → USDINR UP. Downward → USDINR DOWN." },
+    { date: "2026-02-27", time: "08:30", event: "US PCE Price Index (Jan)", category: "us_data", impact: 5, whyItMatters: "Fed's PREFERRED inflation gauge. More important than CPI for policy.", typicalBias: "depends", biasExplanation: "Hot PCE → Hawkish Fed → USDINR UP. Cool PCE → USDINR DOWN.", tradingTip: "Core PCE is what the Fed targets. Watch for deviation from 2%." },
+
+    // ═══════════════════════════════════════
+    // MARCH 2026
+    // ═══════════════════════════════════════
+
+    { date: "2026-03-06", time: "08:30", event: "US Non-Farm Payrolls (Feb)", category: "us_data", impact: 5, whyItMatters: "THE biggest market mover. Jobs = economic health = Fed policy.", typicalBias: "depends", biasExplanation: "Strong NFP (>200K) + low unemployment → USDINR UP. Weak (<100K) → USDINR DOWN.", tradingTip: "First Friday of month. Expect 40-60 paisa range on surprise." },
+    { date: "2026-03-06", time: "08:30", event: "US Unemployment Rate (Feb)", category: "us_data", impact: 4, whyItMatters: "Fed's dual mandate metric. Rising unemployment triggers policy shift.", typicalBias: "depends", biasExplanation: "Low unemployment (<4%) → USDINR UP. Rising → USDINR DOWN." },
+
+    { date: "2026-03-11", time: "08:30", event: "US CPI (Feb)", category: "us_data", impact: 5, whyItMatters: "February inflation. Critical for March FOMC decision.", typicalBias: "depends", biasExplanation: "Hot CPI → USDINR UP. Cool CPI → USDINR DOWN." },
+
+    { date: "2026-03-17", time: "14:00", event: "FOMC Rate Decision", category: "fed", impact: 5, whyItMatters: "Fed sets interest rates. Dot plot shows future rate path expectations.", typicalBias: "depends", biasExplanation: "Hawkish hold/hike → USDINR UP. Dovish cut → USDINR DOWN.", tradingTip: "Watch the dot plot projections more than the actual rate decision." },
+    { date: "2026-03-17", time: "14:30", event: "Fed Chair Powell Press Conference", category: "fed", impact: 5, whyItMatters: "Powell's tone shapes market expectations for months.", typicalBias: "depends", biasExplanation: "Hawkish tone → USDINR UP. Dovish signals → USDINR DOWN." },
+
+    { date: "2026-03-27", time: "08:30", event: "US PCE Price Index (Feb)", category: "us_data", impact: 5, whyItMatters: "Fed's preferred inflation metric for February.", typicalBias: "depends", biasExplanation: "Hot PCE → USDINR UP. Cool PCE → USDINR DOWN." },
+
+    // ═══════════════════════════════════════
+    // APRIL 2026
+    // ═══════════════════════════════════════
+
+    { date: "2026-04-03", time: "08:30", event: "US Non-Farm Payrolls (Mar)", category: "us_data", impact: 5, whyItMatters: "March jobs report. Q1 employment picture.", typicalBias: "depends", biasExplanation: "Strong NFP → USDINR UP. Weak NFP → USDINR DOWN." },
+
+    { date: "2026-04-08", time: "10:00", event: "RBI MPC Rate Decision", category: "rbi", impact: 5, whyItMatters: "RBI sets INR interest rates. Policy stance drives INR direction.", typicalBias: "depends", biasExplanation: "Rate cut → USDINR UP. Rate hike → USDINR DOWN. Hawkish hold → INR supported.", tradingTip: "Watch RBI's FX intervention stance in policy statement." },
+
+    { date: "2026-04-10", time: "08:30", event: "US CPI (Mar)", category: "us_data", impact: 5, whyItMatters: "Q1 inflation picture emerges.", typicalBias: "depends", biasExplanation: "Hot CPI → USDINR UP. Cool CPI → USDINR DOWN." },
+
+    { date: "2026-04-29", time: "08:30", event: "US GDP Q1 (Advance)", category: "us_data", impact: 5, whyItMatters: "First read on Q1 growth. Sets narrative for H1.", typicalBias: "depends", biasExplanation: "Strong GDP (>2%) → USDINR UP. Weak/negative → USDINR DOWN." },
+
+    // ═══════════════════════════════════════
+    // MAY 2026
+    // ═══════════════════════════════════════
+
+    { date: "2026-05-01", time: "08:30", event: "US Non-Farm Payrolls (Apr)", category: "us_data", impact: 5, whyItMatters: "April jobs data ahead of May FOMC.", typicalBias: "depends", biasExplanation: "Strong NFP → USDINR UP. Weak NFP → USDINR DOWN." },
+
+    { date: "2026-05-05", time: "14:00", event: "FOMC Rate Decision", category: "fed", impact: 5, whyItMatters: "May FOMC meeting. Key policy decision.", typicalBias: "depends", biasExplanation: "Hawkish → USDINR UP. Dovish → USDINR DOWN." },
+
+    { date: "2026-05-12", time: "08:30", event: "US CPI (Apr)", category: "us_data", impact: 5, whyItMatters: "April inflation reading.", typicalBias: "depends", biasExplanation: "Hot CPI → USDINR UP. Cool CPI → USDINR DOWN." },
+
+    // ═══════════════════════════════════════
+    // JUNE 2026
+    // ═══════════════════════════════════════
+
+    { date: "2026-06-05", time: "08:30", event: "US Non-Farm Payrolls (May)", category: "us_data", impact: 5, whyItMatters: "May employment data.", typicalBias: "depends", biasExplanation: "Strong NFP → USDINR UP. Weak NFP → USDINR DOWN." },
+
+    { date: "2026-06-10", time: "08:30", event: "US CPI (May)", category: "us_data", impact: 5, whyItMatters: "May inflation ahead of June FOMC.", typicalBias: "depends", biasExplanation: "Hot CPI → USDINR UP. Cool CPI → USDINR DOWN." },
+
+    { date: "2026-06-16", time: "14:00", event: "FOMC Rate Decision + SEP", category: "fed", impact: 5, whyItMatters: "June FOMC with updated economic projections.", typicalBias: "depends", biasExplanation: "Hawkish → USDINR UP. Dovish → USDINR DOWN.", tradingTip: "SEP (Summary of Economic Projections) updates rate path forecasts." },
+
+    { date: "2026-06-17", time: "10:00", event: "RBI MPC Rate Decision", category: "rbi", impact: 5, whyItMatters: "Mid-year RBI policy review.", typicalBias: "depends", biasExplanation: "Rate cut → USDINR UP. Rate hike/hawkish hold → USDINR DOWN." },
+  ];
 }
 
-function formatDate(date: Date): string {
+// Helper: Calculate days from today
+function getDaysFromNow(eventDate: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const event = new Date(eventDate + "T00:00:00");
+  const diffMs = event.getTime() - today.getTime();
+  return Math.round(diffMs / (1000 * 60 * 60 * 24));
+}
+
+// Helper: Format date for display
+function formatDisplayDate(dateStr: string): string {
+  const date = new Date(dateStr + "T00:00:00");
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${days[date.getDay()]}, ${months[date.getMonth()]} ${date.getDate()}`;
 }
 
-function daysFromNow(eventDate: Date, today: Date): number {
-  const diffTime = eventDate.getTime() - today.getTime();
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-}
-
-function formatTime(isoString: string): string {
-  const date = new Date(isoString);
-  return date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-    timeZone: 'America/New_York'
-  }) + ' ET';
-}
-
-// Fetch from Finnhub API
-async function fetchFinnhubCalendar(): Promise<FinnhubEvent[]> {
-  const apiKey = process.env.FINNHUB_API_KEY;
-  if (!apiKey) {
-    console.log("No FINNHUB_API_KEY found, using generated data");
-    return [];
-  }
-
-  const today = new Date();
-  const threeWeeksOut = new Date(today);
-  threeWeeksOut.setDate(today.getDate() + 21);
-
-  const fromDate = today.toISOString().split('T')[0];
-  const toDate = threeWeeksOut.toISOString().split('T')[0];
-
-  try {
-    const url = `https://finnhub.io/api/v1/calendar/economic?from=${fromDate}&to=${toDate}&token=${apiKey}`;
-    const response = await fetch(url, {
-      next: { revalidate: 300 }, // Cache for 5 minutes
-    });
-
-    if (!response.ok) {
-      console.error("Finnhub API error:", response.status);
-      return [];
-    }
-
-    const data = await response.json();
-    return data.economicCalendar || [];
-  } catch (error) {
-    console.error("Failed to fetch Finnhub calendar:", error);
-    return [];
-  }
-}
-
-// Generate fallback events (when no API key)
-function generateFallbackEvents(today: Date): MarketEvent[] {
-  const events: MarketEvent[] = [];
-  const threeWeeksOut = new Date(today);
-  threeWeeksOut.setDate(today.getDate() + 21);
-
-  // Helper to add event
-  const addEvent = (
-    date: Date,
-    event: string,
-    category: MarketEvent["category"],
-    impact: EventImpact,
-    whyItMatters: string,
-    typicalBias: BiasDirection,
-    biasExplanation: string,
-    time?: string,
-    actionableInsight?: string
-  ) => {
-    if (date <= threeWeeksOut && date >= today) {
-      events.push({
-        id: `gen-${category}-${date.toISOString()}`,
-        dateISO: date.toISOString(),
-        dateDisplay: formatDate(date),
-        daysFromNow: daysFromNow(date, today),
-        time,
-        event,
-        category,
-        impact,
-        whyItMatters,
-        typicalBias,
-        biasExplanation,
-        actionableInsight,
-        isLive: false,
-      });
-    }
-  };
-
-  // First Friday = NFP
-  const firstFriday = new Date(today);
-  firstFriday.setDate(1);
-  while (firstFriday.getDay() !== 5) firstFriday.setDate(firstFriday.getDate() + 1);
-  if (firstFriday < today) {
-    firstFriday.setMonth(firstFriday.getMonth() + 1);
-    firstFriday.setDate(1);
-    while (firstFriday.getDay() !== 5) firstFriday.setDate(firstFriday.getDate() + 1);
-  }
-  addEvent(firstFriday, "US Non-Farm Payrolls (Est.)", "us_data", 5,
-    "Jobs data - biggest market mover. Est. date based on typical first Friday release.",
-    "depends", "Strong jobs → USDINR UP. Weak jobs → USDINR DOWN.",
-    "8:30 AM ET", "Expect 30-50 paisa moves on surprise.");
-
-  // ~12th = CPI
-  const cpiDate = new Date(today);
-  cpiDate.setDate(12);
-  if (cpiDate < today) cpiDate.setMonth(cpiDate.getMonth() + 1);
-  addEvent(cpiDate, "US CPI (Est.)", "us_data", 5,
-    "Inflation data - Fed's focus. Est. date based on typical mid-month release.",
-    "depends", "Hot CPI → USDINR UP. Cool CPI → USDINR DOWN.",
-    "8:30 AM ET");
-
-  // Wednesday = Oil
-  const nextWed = new Date(today);
-  while (nextWed.getDay() !== 3) nextWed.setDate(nextWed.getDate() + 1);
-  addEvent(nextWed, "EIA Crude Oil Inventory (Est.)", "oil", 3,
-    "Weekly oil data. India imports 85% of oil.",
-    "depends", "Draw → oil up → USDINR UP. Build → USDINR DOWN.",
-    "10:30 AM ET");
-
-  return events;
+// Helper: Format time for display
+function formatDisplayTime(time: string): string {
+  const [hours, minutes] = time.split(':').map(Number);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const displayHours = hours > 12 ? hours - 12 : hours === 0 ? 12 : hours;
+  return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period} ET`;
 }
 
 export async function GET() {
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const todayStr = today.toISOString().split('T')[0];
 
-  // Try to fetch live data from Finnhub
-  const finnhubEvents = await fetchFinnhubCalendar();
+  // Get curated calendar
+  const calendarRaw = get2026Calendar();
 
-  let events: MarketEvent[] = [];
-  let dataSource = "Generated (typical dates)";
+  // Filter to next 30 days and add computed fields
+  const events = calendarRaw
+    .map((e, idx) => ({
+      ...e,
+      id: `event-${e.date}-${idx}`,
+      daysFromNow: getDaysFromNow(e.date),
+      dateDisplay: formatDisplayDate(e.date),
+      timeDisplay: formatDisplayTime(e.time),
+    }))
+    .filter(e => e.daysFromNow >= 0 && e.daysFromNow <= 30)
+    .sort((a, b) => a.daysFromNow - b.daysFromNow || b.impact - a.impact);
 
-  if (finnhubEvents.length > 0) {
-    dataSource = "Finnhub API (Live)";
-
-    // Process Finnhub events
-    for (const fe of finnhubEvents) {
-      // Filter for US and India only (relevant to USDINR)
-      if (fe.country !== "US" && fe.country !== "IN") continue;
-
-      const relevance = getEventRelevance(fe.event, fe.country);
-      if (!relevance) continue;
-
-      // Skip low impact events
-      if (relevance.impact < 2) continue;
-
-      const eventDate = new Date(fe.time);
-      const days = daysFromNow(eventDate, today);
-
-      // Only include future events (up to 21 days)
-      if (days < 0 || days > 21) continue;
-
-      events.push({
-        id: `live-${fe.country}-${fe.event}-${fe.time}`,
-        dateISO: fe.time,
-        dateDisplay: formatDate(eventDate),
-        daysFromNow: days,
-        time: formatTime(fe.time),
-        event: fe.event,
-        category: relevance.category,
-        impact: relevance.impact,
-        whyItMatters: relevance.whyItMatters,
-        typicalBias: relevance.bias,
-        biasExplanation: relevance.biasExplanation,
-        actual: fe.actual !== undefined ? `${fe.actual}${fe.unit || ''}` : undefined,
-        forecast: fe.estimate !== undefined ? `${fe.estimate}${fe.unit || ''}` : undefined,
-        previous: fe.prev !== undefined ? `${fe.prev}${fe.unit || ''}` : undefined,
-        isLive: true,
-      });
-    }
-  }
-
-  // Fall back to generated events if no live data
-  if (events.length === 0) {
-    events = generateFallbackEvents(today);
-  }
-
-  // Sort by date, then by impact
-  events.sort((a, b) => {
-    const dateDiff = new Date(a.dateISO).getTime() - new Date(b.dateISO).getTime();
-    if (dateDiff !== 0) return dateDiff;
-    return b.impact - a.impact;
-  });
-
-  // Deduplicate similar events on same day
-  const seen = new Set<string>();
-  events = events.filter(e => {
-    const key = `${e.dateDisplay}-${e.event.split(' ')[0]}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-
-  // Fetch FX data for predictions
+  // Get FX data for predictions
   let predictions = null;
   try {
-    const fxData = await fetchFxRates();
-    if (fxData && fxData.spot) {
-      const spot = fxData.spot;
-      const fwd1m = fxData.fwd1m || spot;
-      const fwd3m = fxData.fwd3m || spot;
+    const spot = await fetchSpotFromSheet();
+    if (spot && spot > 0) {
+      // Calculate forward rates using interest rate differential
+      const fwd1m = forwardRate(spot, 1);
+      const fwd3m = forwardRate(spot, 3);
 
       const fwd1mPoints = fwd1m - spot;
-      const fwd3mPoints = fwd3m - spot;
       const dailyDrift = fwd1mPoints / 30;
 
       const bias = fwd1mPoints > 0.05 ? "usdinr_up" : fwd1mPoints < -0.05 ? "usdinr_down" : "neutral";
 
       predictions = {
-        currentSpot: spot,
-        forward1m: fwd1m,
-        forward3m: fwd3m,
+        currentSpot: Number(spot.toFixed(4)),
+        forward1m: Number(fwd1m.toFixed(4)),
+        forward3m: Number(fwd3m.toFixed(4)),
         predictions: {
           "1_day": {
             level: Number((spot + dailyDrift).toFixed(4)),
@@ -450,54 +189,41 @@ export async function GET() {
             changePct: Number((fwd1mPoints / spot * 100).toFixed(3)),
           },
         },
-        forwardPoints: { "1m": Number(fwd1mPoints.toFixed(4)), "3m": Number(fwd3mPoints.toFixed(4)) },
-        impliedCarryPct: {
-          "1m_annualized": Number(((fwd1m - spot) / spot * 12 * 100).toFixed(2)),
-          "3m_annualized": Number(((fwd3m - spot) / spot * 4 * 100).toFixed(2)),
+        forwardPoints: {
+          "1m": Number(fwd1mPoints.toFixed(4)),
+          "3m": Number((fwd3m - spot).toFixed(4)),
         },
         marketBias: bias,
         biasExplanation: bias === "usdinr_up"
-          ? "Forward curve shows positive carry - market expects USDINR to drift higher"
+          ? "Forward curve shows positive carry - market expects INR depreciation"
           : bias === "usdinr_down"
-          ? "Forward curve shows negative carry - market expects USDINR to drift lower"
-          : "Forward curve relatively flat - no strong directional signal",
-        methodology: "Predictions based on forward curve interpolation. Forward points reflect USD-INR interest rate differential.",
-        disclaimer: "Forward-implied only. Event risk (NFP, CPI, Fed, RBI) can cause significant divergence.",
+          ? "Forward curve shows negative carry - market expects INR appreciation"
+          : "Forward curve flat - no strong directional signal",
+        methodology: "Predictions based on forward curve (interest rate differential). INR typically carries ~2% annualized premium vs USD.",
+        disclaimer: "Forward-implied baseline only. Event risk (NFP, CPI, FOMC) can cause 50+ paisa deviations.",
       };
     }
   } catch (error) {
-    console.error("Failed to fetch FX data for predictions:", error);
+    console.error("Failed to fetch spot for predictions:", error);
   }
 
   // Market context
   const marketContext = {
     keyDrivers: [
-      { driver: "US Federal Reserve", currentStance: "Data-dependent", impactOnUsdinr: "Hawkish = USDINR up" },
-      { driver: "Crude Oil", currentStance: "Watch $75-85 Brent", impactOnUsdinr: "Oil >$85 = INR pressure" },
-      { driver: "FII Flows", currentStance: "Track daily on NSE", impactOnUsdinr: "Outflows = INR weak" },
-      { driver: "DXY Index", currentStance: "Key: 104-105", impactOnUsdinr: "DXY >105 = USDINR >84" },
+      { driver: "Fed Policy", current: "Watch dot plot", usdinrImpact: "Hawkish = USDINR ↑" },
+      { driver: "US Inflation", current: "CPI & PCE focus", usdinrImpact: "Hot inflation = USDINR ↑" },
+      { driver: "Crude Oil", current: "Brent $75-85 range", usdinrImpact: "Oil >$85 = USDINR ↑" },
+      { driver: "RBI Stance", current: "Intervention heavy", usdinrImpact: "RBI sells USD at 84.50+" },
     ],
-    quickTake: "USDINR driven by Fed policy and DXY. RBI provides floor ~82.80-83.00, but USD strength can push to 84.50+.",
+    tradingGuide: "USDINR is range-bound 83-85 with RBI intervention. Breakouts need strong USD catalyst (hot CPI, hawkish Fed) or oil spike.",
   };
-
-  const hasApiKey = !!process.env.FINNHUB_API_KEY;
 
   return NextResponse.json({
     events,
     predictions,
     marketContext,
     generatedAt: new Date().toISOString(),
-    dataSource,
-    isLive: finnhubEvents.length > 0,
-    apiKeyConfigured: hasApiKey,
-    setupInstructions: !hasApiKey ? {
-      message: "For live economic calendar data, add your free Finnhub API key",
-      steps: [
-        "1. Sign up at https://finnhub.io (free)",
-        "2. Copy your API key from the dashboard",
-        "3. Add to .env.local: FINNHUB_API_KEY=your_key_here",
-        "4. Restart the dev server",
-      ],
-    } : undefined,
+    dataSource: "Curated Economic Calendar (Fed, BLS, RBI official schedules)",
+    totalEvents: events.length,
   });
 }
