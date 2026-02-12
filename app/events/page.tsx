@@ -18,6 +18,27 @@ type MarketEvent = {
   timeDisplay: string;
 };
 
+type MarketSignal = {
+  symbol: string;
+  name: string;
+  value: number;
+  change: number;
+  changePct: number;
+  signal: "bullish" | "bearish" | "neutral";
+  usdinrBias: "up" | "down" | "neutral";
+  reasoning: string;
+};
+
+type CombinedSignal = {
+  direction: "bullish" | "bearish" | "mixed";
+  bullishCount: number;
+  bearishCount: number;
+  neutralCount: number;
+  total: number;
+  strength: number;
+  summary: string;
+};
+
 type Prediction = {
   level: number;
   change: number;
@@ -37,24 +58,14 @@ type Predictions = {
   forwardPoints: { "1m": number; "3m": number };
   marketBias: string;
   biasExplanation: string;
-  methodology: string;
-  disclaimer: string;
-};
-
-type MarketContext = {
-  keyDrivers: {
-    driver: string;
-    current: string;
-    usdinrImpact: string;
-  }[];
-  tradingGuide: string;
+  note: string;
 };
 
 export default function EventWatchPage() {
   const [events, setEvents] = useState<MarketEvent[]>([]);
   const [predictions, setPredictions] = useState<Predictions | null>(null);
-  const [marketContext, setMarketContext] = useState<MarketContext | null>(null);
-  const [dataSource, setDataSource] = useState("");
+  const [marketSignals, setMarketSignals] = useState<MarketSignal[]>([]);
+  const [combinedSignal, setCombinedSignal] = useState<CombinedSignal | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
 
@@ -64,21 +75,15 @@ export default function EventWatchPage() {
       .then((data) => {
         setEvents(data.events || []);
         setPredictions(data.predictions || null);
-        setMarketContext(data.marketContext || null);
-        setDataSource(data.dataSource || "");
+        setMarketSignals(data.marketSignals || []);
+        setCombinedSignal(data.combinedSignal || null);
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, []);
 
   const getImpactStars = (impact: number) => "★".repeat(impact) + "☆".repeat(5 - impact);
-
-  const getImpactColor = (impact: number) => {
-    if (impact >= 5) return "#ef4444";
-    if (impact >= 4) return "#f59e0b";
-    if (impact >= 3) return "#3b82f6";
-    return "#6b7280";
-  };
+  const getImpactColor = (impact: number) => impact >= 5 ? "#ef4444" : impact >= 4 ? "#f59e0b" : impact >= 3 ? "#3b82f6" : "#6b7280";
 
   const getCategoryStyle = (category: string) => {
     const styles: Record<string, { label: string; color: string; bg: string }> = {
@@ -93,10 +98,10 @@ export default function EventWatchPage() {
 
   const getBiasStyle = (bias: string) => {
     switch (bias) {
-      case "usdinr_up": return { icon: "↑", color: "#ef4444", text: "USDINR UP" };
-      case "usdinr_down": return { icon: "↓", color: "#22c55e", text: "USDINR DOWN" };
-      case "volatile": return { icon: "↔", color: "#f59e0b", text: "VOLATILE" };
-      default: return { icon: "?", color: "#3b82f6", text: "DATA DEPENDENT" };
+      case "usdinr_up": return { icon: "↑", color: "#ef4444" };
+      case "usdinr_down": return { icon: "↓", color: "#22c55e" };
+      case "volatile": return { icon: "↔", color: "#f59e0b" };
+      default: return { icon: "?", color: "#3b82f6" };
     }
   };
 
@@ -108,7 +113,6 @@ export default function EventWatchPage() {
     return { text: `${days}d`, color: "#6b7280", bg: "rgba(107, 114, 128, 0.1)" };
   };
 
-  // Split events
   const thisWeek = events.filter((e) => e.daysFromNow <= 7);
   const nextWeeks = events.filter((e) => e.daysFromNow > 7);
 
@@ -137,29 +141,109 @@ export default function EventWatchPage() {
           </span>
         </div>
         <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-          Next 30 days • {events.length} events
+          {events.length} events • Next 30 days
         </div>
       </div>
 
-      {/* USDINR Outlook - Key Feature */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* MARKET SIGNALS - Live directional indicators */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {marketSignals.length > 0 && (
+        <div className="card p-5" style={{ border: "2px solid #8b5cf6" }}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>Direction Signals</h2>
+              <span className="text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(34, 197, 94, 0.2)", color: "#22c55e" }}>
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                LIVE
+              </span>
+            </div>
+            {combinedSignal && (
+              <div className="text-xs font-medium" style={{
+                color: combinedSignal.direction === "bullish" ? "#ef4444"
+                  : combinedSignal.direction === "bearish" ? "#22c55e" : "#f59e0b"
+              }}>
+                {combinedSignal.summary}
+              </div>
+            )}
+          </div>
+
+          {/* Combined Signal Bar */}
+          {combinedSignal && (
+            <div className="mb-4 p-3 rounded-lg" style={{
+              background: combinedSignal.direction === "bullish" ? "rgba(239, 68, 68, 0.1)"
+                : combinedSignal.direction === "bearish" ? "rgba(34, 197, 94, 0.1)" : "rgba(245, 158, 11, 0.1)",
+              border: `1px solid ${combinedSignal.direction === "bullish" ? "rgba(239, 68, 68, 0.3)"
+                : combinedSignal.direction === "bearish" ? "rgba(34, 197, 94, 0.3)" : "rgba(245, 158, 11, 0.3)"}`
+            }}>
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">
+                  {combinedSignal.direction === "bullish" ? "↑" : combinedSignal.direction === "bearish" ? "↓" : "↔"}
+                </span>
+                <div>
+                  <div className="font-bold" style={{
+                    color: combinedSignal.direction === "bullish" ? "#ef4444"
+                      : combinedSignal.direction === "bearish" ? "#22c55e" : "#f59e0b"
+                  }}>
+                    {combinedSignal.direction === "bullish" ? "USDINR Bullish"
+                      : combinedSignal.direction === "bearish" ? "USDINR Bearish" : "Mixed Signals"}
+                  </div>
+                  <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                    {combinedSignal.bullishCount} bullish • {combinedSignal.bearishCount} bearish • {combinedSignal.neutralCount} neutral
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Individual Signals Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {marketSignals.map((signal) => (
+              <div key={signal.symbol} className="p-3 rounded-lg" style={{ background: "var(--bg-card-hover)", border: "1px solid var(--border)" }}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-bold" style={{ color: "var(--text-muted)" }}>{signal.symbol}</span>
+                  <span className="text-sm font-bold" style={{
+                    color: signal.usdinrBias === "up" ? "#ef4444" : signal.usdinrBias === "down" ? "#22c55e" : "#6b7280"
+                  }}>
+                    {signal.usdinrBias === "up" ? "↑" : signal.usdinrBias === "down" ? "↓" : "→"}
+                  </span>
+                </div>
+                <div className="text-lg font-bold mb-0.5" style={{ color: "var(--text-primary)" }}>
+                  {signal.symbol === "US10Y" ? `${signal.value}%` : signal.symbol === "BRENT" ? `$${signal.value}` : signal.value}
+                </div>
+                <div className="text-xs" style={{ color: signal.changePct >= 0 ? "#ef4444" : "#22c55e" }}>
+                  {signal.changePct >= 0 ? "+" : ""}{signal.changePct.toFixed(2)}%
+                </div>
+                <div className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>{signal.reasoning}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3 text-[10px]" style={{ color: "var(--text-muted)" }}>
+            DXY↑ = USD strong globally • BRENT↑ = INR pressure (import bill) • US10Y↑ = USD yield attractive • VIX↑ = Risk-off, EM weak
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* FORWARD CURVE OUTLOOK */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
       {predictions && (
         <div className="card p-5" style={{ border: "2px solid #06b6d4" }}>
           <div className="flex items-center gap-2 mb-4">
-            <h2 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>USDINR Outlook</h2>
+            <h2 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>Forward Curve Outlook</h2>
             <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "rgba(6, 182, 212, 0.2)", color: "#06b6d4" }}>
-              FORWARD CURVE
+              CARRY TRADE IMPLIED
             </span>
           </div>
 
-          {/* Spot Rate */}
+          {/* Spot */}
           <div className="flex items-baseline gap-3 mb-4">
-            <span className="text-3xl font-bold" style={{ color: "#06b6d4" }}>
-              {predictions.currentSpot.toFixed(4)}
-            </span>
-            <span className="text-sm" style={{ color: "var(--text-muted)" }}>Spot</span>
+            <span className="text-3xl font-bold" style={{ color: "#06b6d4" }}>{predictions.currentSpot.toFixed(4)}</span>
+            <span className="text-sm" style={{ color: "var(--text-muted)" }}>Spot (live)</span>
           </div>
 
-          {/* Predictions */}
+          {/* Predictions Grid */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             {[
               { label: "1 Day", data: predictions.predictions["1_day"] },
@@ -169,11 +253,9 @@ export default function EventWatchPage() {
             ].map(({ label, data }) => (
               <div key={label} className="p-3 rounded-lg" style={{ background: "var(--bg-card-hover)", border: "1px solid var(--border)" }}>
                 <div className="text-[10px] mb-1" style={{ color: "var(--text-muted)" }}>{label}</div>
-                <div className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>
-                  {data.level.toFixed(4)}
-                </div>
+                <div className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>{data.level.toFixed(4)}</div>
                 <div className="text-xs" style={{ color: data.change >= 0 ? "#ef4444" : "#22c55e" }}>
-                  {data.change >= 0 ? "+" : ""}{data.change.toFixed(4)} ({data.changePct >= 0 ? "+" : ""}{data.changePct.toFixed(3)}%)
+                  {data.change >= 0 ? "+" : ""}{data.change.toFixed(4)}
                 </div>
               </div>
             ))}
@@ -181,63 +263,32 @@ export default function EventWatchPage() {
 
           {/* Bias */}
           <div className="p-3 rounded-lg mb-3" style={{
-            background: predictions.marketBias === "usdinr_up" ? "rgba(239, 68, 68, 0.1)"
-              : predictions.marketBias === "usdinr_down" ? "rgba(34, 197, 94, 0.1)" : "rgba(59, 130, 246, 0.1)",
-            border: `1px solid ${predictions.marketBias === "usdinr_up" ? "rgba(239, 68, 68, 0.3)"
-              : predictions.marketBias === "usdinr_down" ? "rgba(34, 197, 94, 0.3)" : "rgba(59, 130, 246, 0.3)"}`
+            background: predictions.marketBias === "usdinr_up" ? "rgba(239, 68, 68, 0.1)" : predictions.marketBias === "usdinr_down" ? "rgba(34, 197, 94, 0.1)" : "rgba(59, 130, 246, 0.1)",
+            border: `1px solid ${predictions.marketBias === "usdinr_up" ? "rgba(239, 68, 68, 0.3)" : predictions.marketBias === "usdinr_down" ? "rgba(34, 197, 94, 0.3)" : "rgba(59, 130, 246, 0.3)"}`
           }}>
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2">
               <span className="text-xl">{predictions.marketBias === "usdinr_up" ? "↑" : predictions.marketBias === "usdinr_down" ? "↓" : "→"}</span>
-              <span className="font-semibold" style={{
-                color: predictions.marketBias === "usdinr_up" ? "#ef4444" : predictions.marketBias === "usdinr_down" ? "#22c55e" : "#3b82f6"
-              }}>
-                {predictions.marketBias === "usdinr_up" ? "Bias: USDINR UP (INR Weaker)" : predictions.marketBias === "usdinr_down" ? "Bias: USDINR DOWN (INR Stronger)" : "Bias: NEUTRAL"}
-              </span>
-            </div>
-            <div className="text-sm" style={{ color: "var(--text-secondary)" }}>{predictions.biasExplanation}</div>
-          </div>
-
-          {/* Forward Points */}
-          <div className="grid grid-cols-2 gap-3 mb-3 text-xs">
-            <div>
-              <span style={{ color: "var(--text-muted)" }}>1M Fwd Points: </span>
-              <span style={{ color: "var(--text-primary)" }}>{predictions.forwardPoints["1m"] >= 0 ? "+" : ""}{predictions.forwardPoints["1m"].toFixed(4)}</span>
-            </div>
-            <div>
-              <span style={{ color: "var(--text-muted)" }}>3M Fwd Points: </span>
-              <span style={{ color: "var(--text-primary)" }}>{predictions.forwardPoints["3m"] >= 0 ? "+" : ""}{predictions.forwardPoints["3m"].toFixed(4)}</span>
-            </div>
-          </div>
-
-          {/* Disclaimer */}
-          <div className="text-[10px] p-2 rounded" style={{ background: "var(--bg-card)", color: "var(--text-muted)" }}>
-            {predictions.disclaimer}
-          </div>
-        </div>
-      )}
-
-      {/* Market Context */}
-      {marketContext && (
-        <div className="card p-5">
-          <h2 className="text-sm font-bold mb-3" style={{ color: "var(--text-primary)" }}>What Moves USDINR</h2>
-
-          <div className="p-3 rounded-lg mb-4" style={{ background: "rgba(59, 130, 246, 0.1)", border: "1px solid rgba(59, 130, 246, 0.2)" }}>
-            <div className="text-sm" style={{ color: "var(--text-secondary)" }}>{marketContext.tradingGuide}</div>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {marketContext.keyDrivers.map((d, i) => (
-              <div key={i} className="p-3 rounded-lg" style={{ background: "var(--bg-card-hover)", border: "1px solid var(--border)" }}>
-                <div className="text-xs font-bold mb-1" style={{ color: "var(--text-primary)" }}>{d.driver}</div>
-                <div className="text-[10px] mb-1" style={{ color: "var(--text-muted)" }}>{d.current}</div>
-                <div className="text-[10px] font-medium" style={{ color: "#f59e0b" }}>{d.usdinrImpact}</div>
+              <div>
+                <div className="font-semibold" style={{ color: predictions.marketBias === "usdinr_up" ? "#ef4444" : predictions.marketBias === "usdinr_down" ? "#22c55e" : "#3b82f6" }}>
+                  {predictions.biasExplanation}
+                </div>
+                <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                  1M Points: {predictions.forwardPoints["1m"] >= 0 ? "+" : ""}{predictions.forwardPoints["1m"].toFixed(4)} •
+                  3M Points: {predictions.forwardPoints["3m"] >= 0 ? "+" : ""}{predictions.forwardPoints["3m"].toFixed(4)}
+                </div>
               </div>
-            ))}
+            </div>
+          </div>
+
+          <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+            {predictions.note}
           </div>
         </div>
       )}
 
-      {/* This Week's Events */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* THIS WEEK'S EVENTS */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
       {thisWeek.length > 0 && (
         <div className="card p-5">
           <h2 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
@@ -263,28 +314,19 @@ export default function EventWatchPage() {
                   <div className="p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
-                        {/* Date/Time Row */}
                         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: days.bg, color: days.color }}>
-                            {days.text}
-                          </span>
-                          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-                            {event.dateDisplay} • {event.timeDisplay}
-                          </span>
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: days.bg, color: days.color }}>{days.text}</span>
+                          <span className="text-xs" style={{ color: "var(--text-muted)" }}>{event.dateDisplay} • {event.timeDisplay}</span>
                         </div>
-                        {/* Event Name */}
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: cat.bg, color: cat.color }}>
-                            {cat.label}
-                          </span>
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: cat.bg, color: cat.color }}>{cat.label}</span>
                           <span className="text-sm font-semibold truncate" style={{ color: "var(--text-primary)" }}>{event.event}</span>
                         </div>
                       </div>
-                      {/* Right Side: Impact + Bias */}
                       <div className="flex items-center gap-3 flex-shrink-0">
                         <div className="text-right">
                           <div className="text-[9px] mb-0.5" style={{ color: "var(--text-muted)" }}>IMPACT</div>
-                          <div className="text-[10px] tracking-wide" style={{ color: getImpactColor(event.impact) }}>{getImpactStars(event.impact)}</div>
+                          <div className="text-[10px]" style={{ color: getImpactColor(event.impact) }}>{getImpactStars(event.impact)}</div>
                         </div>
                         <div className="text-right">
                           <div className="text-[9px] mb-0.5" style={{ color: "var(--text-muted)" }}>BIAS</div>
@@ -297,7 +339,6 @@ export default function EventWatchPage() {
                     </div>
                   </div>
 
-                  {/* Expanded Details */}
                   {isExpanded && (
                     <div className="px-3 pb-3 pt-2 border-t" style={{ borderColor: "var(--border)" }}>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -325,7 +366,9 @@ export default function EventWatchPage() {
         </div>
       )}
 
-      {/* Coming Up */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* COMING UP */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
       {nextWeeks.length > 0 && (
         <div className="card p-5">
           <h2 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
@@ -369,7 +412,7 @@ export default function EventWatchPage() {
 
       {/* Legend */}
       <div className="card p-4">
-        <div className="text-xs font-bold mb-3" style={{ color: "var(--text-primary)" }}>Reading the Signals</div>
+        <div className="text-xs font-bold mb-3" style={{ color: "var(--text-primary)" }}>Quick Reference</div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[11px]">
           <div>
             <div className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Impact</div>
@@ -378,29 +421,24 @@ export default function EventWatchPage() {
             <div style={{ color: "#3b82f6" }}>★★★☆☆ Moderate</div>
           </div>
           <div>
-            <div className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Bias</div>
+            <div className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Direction</div>
             <div style={{ color: "#ef4444" }}>↑ USDINR likely UP</div>
             <div style={{ color: "#22c55e" }}>↓ USDINR likely DOWN</div>
             <div style={{ color: "#3b82f6" }}>? Data dependent</div>
           </div>
           <div>
-            <div className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Categories</div>
-            <div><span style={{ color: "#ef4444" }}>FED</span> Federal Reserve</div>
-            <div><span style={{ color: "#3b82f6" }}>US</span> US Economic Data</div>
-            <div><span style={{ color: "#f97316" }}>RBI</span> Reserve Bank India</div>
+            <div className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Key Signals</div>
+            <div>DXY = Global USD strength</div>
+            <div>Brent = Oil import cost</div>
+            <div>US10Y = Yield differential</div>
           </div>
           <div>
-            <div className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Key Dates</div>
-            <div>NFP: 1st Friday monthly</div>
-            <div>CPI: ~10th-12th monthly</div>
-            <div>FOMC: 8x/year</div>
+            <div className="font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Key Events</div>
+            <div>NFP = 1st Friday</div>
+            <div>CPI = ~10th-12th</div>
+            <div>FOMC = 8x/year</div>
           </div>
         </div>
-      </div>
-
-      {/* Data Source */}
-      <div className="text-[10px] text-center" style={{ color: "var(--text-muted)" }}>
-        {dataSource}
       </div>
     </div>
   );
