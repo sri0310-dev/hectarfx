@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   fetchHedgesFromSheet,
   saveHedgesToSheet,
+  fetchSpotFromSheet,
   SheetActiveHedge,
   SheetAuditEntry,
 } from "@/lib/sheets";
@@ -62,29 +63,86 @@ async function saveHedgesData(hedges: SheetActiveHedge[], audit: SheetAuditEntry
 }
 
 export async function GET() {
-  const { hedges, audit } = await getHedgesData();
+  const [{ hedges, audit }, spot] = await Promise.all([
+    getHedgesData(),
+    fetchSpotFromSheet(),
+  ]);
+
+  const activeHedges = hedges.filter((h) => h.status === "ACTIVE");
+  const totalUsd = activeHedges.reduce((s, h) => s + h.usdAmount, 0);
+  const totalInr = activeHedges.reduce((s, h) => s + h.inrAmount, 0);
+  const avgRate = totalUsd > 0
+    ? activeHedges.reduce((s, h) => s + h.rate * h.usdAmount, 0) / totalUsd
+    : 0;
+
+  // Calculate P&L: For BUY_USD hedges, profit if spot > hedge rate
+  // P&L = (spot - hedgeRate) * usdAmount for each hedge
+  const currentSpot = spot || 0;
+  const totalPnlInr = currentSpot > 0
+    ? activeHedges.reduce((pnl, h) => {
+        // For buy USD forwards: locked in at hedgeRate, would have paid spot
+        // Profit = (spot - hedgeRate) * usd if spot > hedgeRate
+        const hedgePnl = (currentSpot - h.rate) * h.usdAmount;
+        return pnl + hedgePnl;
+      }, 0)
+    : 0;
+
+  // Group by settlement date
+  const bySettlementDate: Record<string, {
+    date: string;
+    hedges: SheetActiveHedge[];
+    totalUsd: number;
+    totalInr: number;
+    avgRate: number;
+    pnlInr: number;
+  }> = {};
+
+  for (const h of activeHedges) {
+    const date = h.settlementDate;
+    if (!bySettlementDate[date]) {
+      bySettlementDate[date] = {
+        date,
+        hedges: [],
+        totalUsd: 0,
+        totalInr: 0,
+        avgRate: 0,
+        pnlInr: 0,
+      };
+    }
+    bySettlementDate[date].hedges.push(h);
+    bySettlementDate[date].totalUsd += h.usdAmount;
+    bySettlementDate[date].totalInr += h.inrAmount;
+    if (currentSpot > 0) {
+      bySettlementDate[date].pnlInr += (currentSpot - h.rate) * h.usdAmount;
+    }
+  }
+
+  // Calculate weighted avg rate per settlement date
+  for (const key of Object.keys(bySettlementDate)) {
+    const group = bySettlementDate[key];
+    if (group.totalUsd > 0) {
+      group.avgRate = group.hedges.reduce((s, h) => s + h.rate * h.usdAmount, 0) / group.totalUsd;
+    }
+  }
+
+  // Sort by date
+  const settlementGroups = Object.values(bySettlementDate).sort((a, b) =>
+    a.date.localeCompare(b.date)
+  );
 
   return NextResponse.json({
     hedges,
     audit,
+    currentSpot,
     summary: {
-      totalActive: hedges.filter((h) => h.status === "ACTIVE").length,
-      totalUsd: hedges
-        .filter((h) => h.status === "ACTIVE")
-        .reduce((s, h) => s + h.usdAmount, 0),
-      totalInr: hedges
-        .filter((h) => h.status === "ACTIVE")
-        .reduce((s, h) => s + h.inrAmount, 0),
-      avgRate:
-        hedges.filter((h) => h.status === "ACTIVE").length > 0
-          ? hedges
-              .filter((h) => h.status === "ACTIVE")
-              .reduce((s, h) => s + h.rate * h.usdAmount, 0) /
-            hedges
-              .filter((h) => h.status === "ACTIVE")
-              .reduce((s, h) => s + h.usdAmount, 0)
-          : 0,
+      totalActive: activeHedges.length,
+      totalUsd,
+      totalInr,
+      avgRate,
+      pnlInr: totalPnlInr,
+      pnlPaisa: totalUsd > 0 ? (totalPnlInr / totalUsd) : 0, // P&L per USD in paisa
     },
+    settlementGroups,
   });
 }
 

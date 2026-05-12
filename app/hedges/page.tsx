@@ -32,6 +32,17 @@ type HedgeSummary = {
   totalUsd: number;
   totalInr: number;
   avgRate: number;
+  pnlInr: number;
+  pnlPaisa: number;
+};
+
+type SettlementGroup = {
+  date: string;
+  hedges: ActiveHedge[];
+  totalUsd: number;
+  totalInr: number;
+  avgRate: number;
+  pnlInr: number;
 };
 
 function formatINR(n: number): string {
@@ -52,6 +63,8 @@ export default function HedgesPage() {
   const [hedges, setHedges] = useState<ActiveHedge[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [summary, setSummary] = useState<HedgeSummary | null>(null);
+  const [currentSpot, setCurrentSpot] = useState<number>(0);
+  const [settlementGroups, setSettlementGroups] = useState<SettlementGroup[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Add hedge form
@@ -81,6 +94,8 @@ export default function HedgesPage() {
       setHedges(data.hedges || []);
       setAudit(data.audit || []);
       setSummary(data.summary || null);
+      setCurrentSpot(data.currentSpot || 0);
+      setSettlementGroups(data.settlementGroups || []);
     } catch { /* silent */ }
     setLoading(false);
   }, []);
@@ -236,22 +251,83 @@ export default function HedgesPage() {
 
       {/* Summary cards */}
       {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="card">
-            <div className="text-xs text-slate-500">Active Contracts</div>
-            <div className="text-xl font-bold text-blue-400 mt-1">{summary.totalActive}</div>
+        <div className="space-y-4">
+          {/* P&L Card - Prominent */}
+          {currentSpot > 0 && (
+            <div className={`card p-4 border-2 ${summary.pnlInr >= 0 ? "border-green-500/50" : "border-red-500/50"}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-slate-500">Current P&L (vs Spot {currentSpot.toFixed(4)})</div>
+                  <div className={`text-2xl font-bold mt-1 ${summary.pnlInr >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {summary.pnlInr >= 0 ? "+" : ""}{formatINR(summary.pnlInr)}
+                  </div>
+                  <div className={`text-sm ${summary.pnlInr >= 0 ? "text-green-400/70" : "text-red-400/70"}`}>
+                    {summary.pnlPaisa >= 0 ? "+" : ""}{summary.pnlPaisa.toFixed(2)} paisa/USD avg
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] text-slate-500">LIVE SPOT</div>
+                  <div className="text-xl font-mono text-cyan-400">{currentSpot.toFixed(4)}</div>
+                  <div className="text-[10px] text-slate-500 mt-1">vs Avg Hedge</div>
+                  <div className="text-lg font-mono text-amber-400">{summary.avgRate.toFixed(4)}</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="card">
+              <div className="text-xs text-slate-500">Active Contracts</div>
+              <div className="text-xl font-bold text-blue-400 mt-1">{summary.totalActive}</div>
+            </div>
+            <div className="card">
+              <div className="text-xs text-slate-500">Total USD Hedged</div>
+              <div className="text-xl font-bold text-cyan-400 mt-1">{formatUSD(summary.totalUsd)}</div>
+            </div>
+            <div className="card">
+              <div className="text-xs text-slate-500">Total INR Locked</div>
+              <div className="text-xl font-bold text-amber-400 mt-1">{formatINR(summary.totalInr)}</div>
+            </div>
+            <div className="card">
+              <div className="text-xs text-slate-500">Blended Avg Rate</div>
+              <div className="text-xl font-bold text-green-400 mt-1">{summary.avgRate.toFixed(4)}</div>
+            </div>
           </div>
-          <div className="card">
-            <div className="text-xs text-slate-500">Total USD Hedged</div>
-            <div className="text-xl font-bold text-cyan-400 mt-1">{formatUSD(summary.totalUsd)}</div>
-          </div>
-          <div className="card">
-            <div className="text-xs text-slate-500">Total INR Locked</div>
-            <div className="text-xl font-bold text-amber-400 mt-1">{formatINR(summary.totalInr)}</div>
-          </div>
-          <div className="card">
-            <div className="text-xs text-slate-500">Avg Hedge Rate</div>
-            <div className="text-xl font-bold text-green-400 mt-1">{summary.avgRate.toFixed(4)}</div>
+        </div>
+      )}
+
+      {/* Settlement Date Breakdown */}
+      {settlementGroups.length > 0 && (
+        <div className="card">
+          <h3 className="text-sm font-semibold text-slate-300 mb-4">By Settlement Date</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-[#2a3650]">
+                  <th className="table-header">Settlement</th>
+                  <th className="table-header text-right">Contracts</th>
+                  <th className="table-header text-right">USD</th>
+                  <th className="table-header text-right">Avg Rate</th>
+                  {currentSpot > 0 && <th className="table-header text-right">P&L</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#2a3650]/50">
+                {settlementGroups.map((g) => (
+                  <tr key={g.date} className="hover:bg-[#1e2a3f]">
+                    <td className="table-cell font-mono text-slate-300 text-sm">{g.date}</td>
+                    <td className="table-cell text-right text-slate-400 text-sm">{g.hedges.length}</td>
+                    <td className="table-cell font-mono text-right text-cyan-400 text-sm">{formatUSD(g.totalUsd)}</td>
+                    <td className="table-cell font-mono text-right text-amber-400 text-sm font-bold">{g.avgRate.toFixed(4)}</td>
+                    {currentSpot > 0 && (
+                      <td className={`table-cell font-mono text-right text-sm font-bold ${g.pnlInr >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {g.pnlInr >= 0 ? "+" : ""}{formatINR(g.pnlInr)}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
