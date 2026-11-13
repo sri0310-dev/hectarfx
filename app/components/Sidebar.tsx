@@ -114,7 +114,7 @@ export function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-center min-w-0 flex-1 transition-colors ${
+              className={`flex flex-col items-center gap-0.5 px-1.5 py-1.5 rounded-lg text-center min-w-0 flex-1 transition-colors ${
                 isActive
                   ? "text-blue-400 bg-blue-600/10"
                   : ""
@@ -147,13 +147,14 @@ export function Sidebar() {
         </button>
         <button
           onClick={signOut}
-          className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-center min-w-0 transition-colors"
+          aria-label="Sign out"
+          title="Sign out"
+          className="flex flex-col items-center justify-center self-stretch px-1.5 py-1.5 rounded-lg text-center min-w-0 transition-colors"
           style={{ color: "var(--text-muted)" }}
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d={logoutIcon} />
           </svg>
-          <span className="text-[9px] leading-tight">Sign out</span>
         </button>
       </nav>
     </>
