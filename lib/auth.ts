@@ -13,11 +13,18 @@ const ALLOWED_USERS = [
 
 const SHARED_PASSWORD = "Hectarfx123!";
 
-// Set AUTH_SECRET in the environment to sign session cookies.
+// Session cookies are signed with AUTH_SECRET. Until that is set, fall back to
+// the server-only Google service account secret (already present in prod) so
+// cookies can't be forged by anyone who has only read the source code.
+// The literal string is a last resort for local dev with no env at all.
 const FALLBACK_SECRET = "hectarfx-internal-session-secret-change-me";
 
 function getSecret(): string {
-  return process.env.AUTH_SECRET || FALLBACK_SECRET;
+  return (
+    process.env.AUTH_SECRET ||
+    process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
+    FALLBACK_SECRET
+  );
 }
 
 export function checkCredentials(username: string, password: string): string | null {
