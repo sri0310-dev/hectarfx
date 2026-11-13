@@ -14,6 +14,13 @@ const navItems = [
   { href: "/alerts", label: "Alerts", shortLabel: "Alerts", icon: "M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" },
 ];
 
+const logoutIcon = "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1";
+
+async function signOut() {
+  await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+  window.location.href = "/login";
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
@@ -86,6 +93,16 @@ export function Sidebar() {
           <div className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
             Rates auto-refresh every 60s
           </div>
+          <button
+            onClick={signOut}
+            className="w-full flex items-center gap-2 px-3 py-2 mt-3 rounded-lg text-xs transition-colors hover:opacity-80"
+            style={{ color: "var(--text-secondary)", border: "1px solid var(--border)" }}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d={logoutIcon} />
+            </svg>
+            Sign out
+          </button>
         </div>
       </aside>
 
@@ -127,6 +144,16 @@ export function Sidebar() {
             </svg>
           )}
           <span className="text-[9px] leading-tight">Theme</span>
+        </button>
+        <button
+          onClick={signOut}
+          className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-center min-w-0 transition-colors"
+          style={{ color: "var(--text-muted)" }}
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d={logoutIcon} />
+          </svg>
+          <span className="text-[9px] leading-tight">Sign out</span>
         </button>
       </nav>
     </>
