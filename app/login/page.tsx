@@ -90,12 +90,9 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        <div className="flex items-center gap-3 mb-6">
-          <img src="/hectar-logo.svg" alt="Hectar" className="w-9 h-9 rounded-lg" />
-          <div>
-            <div className="text-lg font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>HectarFX</div>
-            <div className="text-[10px] uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Treasury · Internal</div>
-          </div>
+        <div className="mb-6">
+          <img src="/hectar-wordmark.svg" alt="Hectar" className="h-9 w-auto" />
+          <div className="text-[10px] uppercase tracking-widest mt-2" style={{ color: "var(--text-muted)" }}>FX · Treasury · Internal</div>
         </div>
 
         <div className="rounded-lg p-6" style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}>
